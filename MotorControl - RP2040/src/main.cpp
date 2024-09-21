@@ -32,7 +32,8 @@
   #define POSITION_TIME 10000
   //long motor_position = 0;
   double output_angle = 0.0;
-  int enc_last_pos = 0;
+  double output_speed = 0;
+  double output_angle_last = 0;
   unsigned long enc_last_time = 0;
 
   // Display
@@ -53,10 +54,11 @@
     double Pos_Ki = 0.0005; // 0.3
     double Pos_Kd = 0.0; // 0.1
     ArduPID PID_Pos;
-    #define POS_SETPOINT_LIMITS 180.0
+    #define POS_SETPOINT_LIMITS 540.0
     #define POS_WINDUP_LIMITS  64
     #define POS_OUTPUT_LIMITS 255
-  /*// Speed
+  // Speed
+    /*
     double PID_Speed_Input = 0;
     double PID_Speed_Output = 0;
     double PID_Speed_Setpoint = 0;
@@ -70,7 +72,23 @@
     */
     
 
+void AngleCalcs() {
+    // Get encoder position
+    int enc_position = encoder.getCount();
+    unsigned long encoder_time = micros();
+    
+    // Calculate Angle @ output
+    output_angle = (double)enc_position / (ENCODER_CPR * MOTOR_GEARING); // [%rotation]
+    output_angle = 360.0 * output_angle; // [deg]
 
+    // Calculate rotation speed @output
+    output_speed = (output_angle - output_angle_last) / (double)(encoder_time - enc_last_time); // [deg/us]
+    output_speed = output_speed * 166666.6666666667; // Convert to [rpm]
+
+    // Collect previous values
+    output_angle_last = output_angle;
+    enc_last_time = encoder_time;
+}
 
 void RunMotor(int speed) {
   //Serial.print("Motor speed "); Serial.println(speed);
@@ -142,27 +160,17 @@ void setup() {
     PID_Speed_Setpoint = PID_Pos_Output;*/
     //PID_Pos_Setpoint = (double) motor_position;
 
-  enc_last_pos = encoder.getCount();
-  enc_last_time = micros();
+  AngleCalcs();
 
 }
 
 void loop() {
-  double enc_move = 0.0;
-  double enc_move_denum = 0.0;
-  double enc_move_num = 0.0;
-  int enc_position = 0;
+
   if (millis() - PID_sample_last >= SAMPLE_PERIOD) {
-    enc_position = encoder.getCount();
-    output_angle = (double)enc_position / (ENCODER_CPR * MOTOR_GEARING);
-    output_angle = 360.0 * output_angle;
+    AngleCalcs();
     PID_Pos_Input = output_angle;
     CurrentSense();
-    //unsigned long enc_cur_time = micros();
-    //enc_move_num = ((double)enc_position - (double)enc_last_pos);
-    //enc_move_denum = (((double)enc_cur_time - (double)enc_last_time)/1000000.0);
-    //enc_move = enc_move_num / enc_move_denum;
-    //double enc_move = (double)(enc_position - enc_last_pos) / ((double)(enc_cur_time - enc_last_time)/1000000.0) ; //
+  
     
     //PID_Speed_Input = enc_move;
     //enc_last_pos = enc_position;
@@ -173,16 +181,6 @@ void loop() {
     RunMotor((int)PID_Pos_Output);
     PID_sample_last = millis();
 
-  
-
-    //if ( enc_position != enc_last_pos ) {
-    //  Serial.print("Counts / time = speed : ");
-    //    Serial.print(enc_move_num,6);
-    //    Serial.print(" / ");
-    //    Serial.print(enc_move_denum,6);
-    //    Serial.print(" = ");
-    //    Serial.println(enc_move,6);
-    //}
   }
       
   if (millis() - loop_display_last >= DISPLAY_WAIT_TIME) {
@@ -193,7 +191,7 @@ void loop() {
       //  Serial.print(myPID.GetKi());
       //  Serial.print(", Kd ");
       //  Serial.println(myPID.GetKd());
-      Serial.println("Time [ms] | Pos_Setpoint | Pos_Position | Encoder Pos | Pos_Output | Shunt Voltage | Current [mA]");
+      Serial.println("Time [ms] | Pos_Setpoint | Pos_Position | Encoder Pos | Pos_Output | Shunt Voltage | Current [mA] | Output Speed [deg/s]");
       header_display = 0;
     } else {
       header_display++;
@@ -205,13 +203,13 @@ void loop() {
       Serial.print("|");
       Serial.print(PID_Pos_Input, 2);
       Serial.print("|");
-      Serial.print(enc_position);
-      Serial.print("|");
       Serial.print((int)PID_Pos_Output);
       Serial.print("|");
       Serial.print(shuntvoltage);
       Serial.print("|");
       Serial.print(current_mA);
+      Serial.print("|");
+      Serial.print(output_speed);
       //Serial.print("|");
       //Serial.print((int)PID_Speed_Setpoint);
       //Serial.print("|");
