@@ -28,6 +28,8 @@
 
 // Loop
   // Setpoint
+  bool PID_latch = false;
+  #define PID_LATCH_POINT 30.0
   unsigned long loop_position_last = 0;
   #define POSITION_TIME 250
   //long motor_position = 0;
@@ -162,6 +164,9 @@ void setup() {
     //PID_Pos_Setpoint = (double) motor_position;
 
   AngleCalcs();
+  if (PID_Pos_Setpoint - output_angle <= PID_LATCH_POINT) {
+    PID_latch = true;
+  }
 
 }
 
@@ -169,36 +174,43 @@ void loop() {
 
   if (micros() - PID_sample_last >= SAMPLE_PERIOD) {
     AngleCalcs();
-    PID_Pos_Input = output_angle;
     CurrentSense();
-  
-    
-    //PID_Speed_Input = enc_move;
-    //enc_last_pos = enc_position;
-    //enc_last_time = enc_cur_time;
-    PID_Pos.compute();
-    //PID_Speed_Setpoint = PID_Pos_Output;
-    //PID_Speed.compute();
+    PID_Pos_Input = output_angle;
+    if (abs(PID_Pos_Setpoint - output_angle) <= PID_LATCH_POINT) {
+      // Run Motor with PID
+      if (!PID_latch) {
+        PID_latch = true;
+        PID_Pos.reset();
+      }
+      PID_Pos.compute();
+      RunMotor((int)PID_Pos_Output);
+    } else {
+      // Run Motor Bang-Bang
+      if (PID_latch) {
+        PID_latch = false;
+      }
+      if (PID_Pos_Setpoint - output_angle > 0) {
+        PID_Pos_Output = 255.0;
+      } else {
+        PID_Pos_Output = -255.0;
+      }
+    }
     RunMotor((int)PID_Pos_Output);
+
+    // Loop Timing
     PID_sample_last = millis();
 
   }
       
   if (millis() - loop_display_last >= DISPLAY_WAIT_TIME) {
     if (header_display >= HEADER_COUNT) {
-      //Serial.print("Current PID's, Kp ");
-      //  Serial.print(myPID.GetKp());
-      //  Serial.print(", Ki ");
-      //  Serial.print(myPID.GetKi());
-      //  Serial.print(", Kd ");
-      //  Serial.println(myPID.GetKd());
-      Serial.println("Time [ms] | Pos_Setpoint | Pos_Position | Error | Pos_Output | Current [mA] | Output Speed [deg/s]");
+      Serial.println("Time [us]|Pos_Setpoint|Pos_Position|Error|PID_Latch|Pos_Output|Current [mA]|Output Speed [deg/s]");
       header_display = 0;
     } else {
       header_display++;
     }
 
-    Serial.print(millis());
+    Serial.print(micros());
       Serial.print("|");
       Serial.print(PID_Pos_Setpoint,2);
       Serial.print("|");
@@ -206,17 +218,13 @@ void loop() {
       Serial.print("|");
       Serial.print((PID_Pos_Setpoint-PID_Pos_Input),4);
       Serial.print("|");
+      Serial.print(PID_latch);
+      Serial.print("|");
       Serial.print((int)PID_Pos_Output);
       Serial.print("|");
       Serial.print(current_mA);
       Serial.print("|");
       Serial.print(output_speed);
-      //Serial.print("|");
-      //Serial.print((int)PID_Speed_Setpoint);
-      //Serial.print("|");
-      //Serial.print(enc_move_num);
-      //Serial.print("|");
-      //Serial.print((int)PID_Speed_Output);
       Serial.println();
       
     
@@ -225,7 +233,6 @@ void loop() {
   
 
   if (millis() - loop_position_last >= POSITION_TIME) {
-    //motor_position = random(-SETPOINT_LIMITS,SETPOINT_LIMITS);
     PID_Pos_Setpoint = PID_Pos_Setpoint + random(-POS_SETPOINT_MULT,POS_SETPOINT_MULT+1)*POS_SETPOINT_CHANGE;
     Serial.print("New Setpoint: ");
       Serial.println(PID_Pos_Setpoint);
