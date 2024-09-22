@@ -19,22 +19,24 @@
 
 // Current Sensor
   Adafruit_INA219 ina219;
-  float shuntvoltage = 0;
-  float busvoltage = 0;
+  //float shuntvoltage = 0;
+  //float busvoltage = 0;
   float current_mA = 0;
-  float loadvoltage = 0;
-  float power_mW = 0;
+  //float loadvoltage = 0;
+  //float power_mW = 0;
 
 
 // Loop
   // Setpoint
   unsigned long loop_position_last = 0;
-  #define POSITION_TIME 10000
+  #define POSITION_TIME 250
   //long motor_position = 0;
   double output_angle = 0.0;
   double output_speed = 0;
   double output_angle_last = 0;
   unsigned long enc_last_time = 0;
+  #define POS_SETPOINT_CHANGE 30.0
+  #define POS_SETPOINT_MULT    6
 
   // Display
   unsigned long loop_display_last = 0;
@@ -44,17 +46,16 @@
 
 
 // PID
-  #define SAMPLE_PERIOD 2
+  #define SAMPLE_PERIOD 500 //micros
   unsigned long PID_sample_last = 0;
   // Position
     double PID_Pos_Input = 0;
     double PID_Pos_Output = 0;
     double PID_Pos_Setpoint = 0;
-    double Pos_Kp = 0.5; // 1.5
+    double Pos_Kp = 5.0; // 1.5
     double Pos_Ki = 0.0005; // 0.3
-    double Pos_Kd = 0.0; // 0.1
+    double Pos_Kd = 1.0; // 0.1
     ArduPID PID_Pos;
-    #define POS_SETPOINT_LIMITS 540.0
     #define POS_WINDUP_LIMITS  64
     #define POS_OUTPUT_LIMITS 255
   // Speed
@@ -96,8 +97,8 @@ void RunMotor(int speed) {
     digitalWrite(MOTOR_PIN_A, HIGH); 
     analogWrite(MOTOR_PIN_B, 255-speed);
   } else if (speed < MOTOR_OUTPUT_MIN) {
-    digitalWrite(MOTOR_PIN_A, LOW); 
-    analogWrite(MOTOR_PIN_B, -speed);
+    analogWrite(MOTOR_PIN_A, 255+speed);
+    digitalWrite(MOTOR_PIN_B, HIGH); 
   } else {
     digitalWrite(MOTOR_PIN_A, LOW);
     digitalWrite(MOTOR_PIN_B, LOW);
@@ -107,7 +108,7 @@ void RunMotor(int speed) {
 }
 
 void CurrentSense() {
-  shuntvoltage = ina219.getShuntVoltage_mV();
+  //shuntvoltage = ina219.getShuntVoltage_mV();
   //busvoltage = ina219.getBusVoltage_V();
   current_mA = ina219.getCurrent_mA();
   //power_mW = ina219.getPower_mW();
@@ -149,7 +150,7 @@ void setup() {
     //PID_Pos.setDeadBand(-OUTPUT_MIN,OUTPUT_MIN);
     PID_Pos.start();
     //motor_position = POS_SETPOINT_LIMITS;
-    PID_Pos_Setpoint = POS_SETPOINT_LIMITS;
+    PID_Pos_Setpoint = POS_SETPOINT_CHANGE;
 
   // Setup PID - Speed
     /*PID_Speed.begin(&PID_Speed_Input, &PID_Speed_Output, &PID_Speed_Setpoint, Speed_Kp, Speed_Ki, Speed_Kd);
@@ -166,7 +167,7 @@ void setup() {
 
 void loop() {
 
-  if (millis() - PID_sample_last >= SAMPLE_PERIOD) {
+  if (micros() - PID_sample_last >= SAMPLE_PERIOD) {
     AngleCalcs();
     PID_Pos_Input = output_angle;
     CurrentSense();
@@ -191,7 +192,7 @@ void loop() {
       //  Serial.print(myPID.GetKi());
       //  Serial.print(", Kd ");
       //  Serial.println(myPID.GetKd());
-      Serial.println("Time [ms] | Pos_Setpoint | Pos_Position | Encoder Pos | Pos_Output | Shunt Voltage | Current [mA] | Output Speed [deg/s]");
+      Serial.println("Time [ms] | Pos_Setpoint | Pos_Position | Error | Pos_Output | Current [mA] | Output Speed [deg/s]");
       header_display = 0;
     } else {
       header_display++;
@@ -203,9 +204,9 @@ void loop() {
       Serial.print("|");
       Serial.print(PID_Pos_Input, 2);
       Serial.print("|");
-      Serial.print((int)PID_Pos_Output);
+      Serial.print((PID_Pos_Setpoint-PID_Pos_Input),4);
       Serial.print("|");
-      Serial.print(shuntvoltage);
+      Serial.print((int)PID_Pos_Output);
       Serial.print("|");
       Serial.print(current_mA);
       Serial.print("|");
@@ -219,13 +220,13 @@ void loop() {
       Serial.println();
       
     
-    loop_display_last = millis();
+    loop_display_last = micros();
   }
   
 
   if (millis() - loop_position_last >= POSITION_TIME) {
     //motor_position = random(-SETPOINT_LIMITS,SETPOINT_LIMITS);
-    PID_Pos_Setpoint = -PID_Pos_Setpoint;
+    PID_Pos_Setpoint = PID_Pos_Setpoint + random(-POS_SETPOINT_MULT,POS_SETPOINT_MULT+1)*POS_SETPOINT_CHANGE;
     Serial.print("New Setpoint: ");
       Serial.println(PID_Pos_Setpoint);
     loop_position_last = millis();
