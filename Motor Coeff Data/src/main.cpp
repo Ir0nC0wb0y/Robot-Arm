@@ -80,8 +80,8 @@ void RunMotor(int speed) {
     analogWrite(MOTOR_PIN_A, 255+speed);
     digitalWrite(MOTOR_PIN_B, HIGH); 
   } else {
-    digitalWrite(MOTOR_PIN_A, LOW);
-    digitalWrite(MOTOR_PIN_B, LOW);
+    digitalWrite(MOTOR_PIN_A, HIGH);
+    digitalWrite(MOTOR_PIN_B, HIGH);
   }
   
   return;
