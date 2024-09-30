@@ -34,21 +34,25 @@
 // Loop
   // Display
   unsigned long loop_display_last = 0;
-  #define DISPLAY_WAIT_TIME 1000
+  #define DISPLAY_WAIT_TIME 100
   int header_display = 0;
   #define HEADER_COUNT 200
   bool display_force = false;
 
   // Speed
+  int speed_set = 0;
   int speed_cur = 0;
   int speed_temp = 0;
   #define SPEED_CHANGE 5
   bool speed_dir = true;
   bool speed_go = false;
-  #define SPEED_RUN_GO 250000
-  #define SPEED_RUN_STOP 500000
+  #define SPEED_STEP           1
+  #define SPEED_RUN_STEP    1000
+  #define SPEED_RUN_GO    500000
+  #define SPEED_RUN_STOP  500000
   unsigned long loop_speed_next = 0;
-
+  unsigned long loop_speed_step = 0;
+  
     
 
 void AngleCalcs() {
@@ -71,29 +75,59 @@ void AngleCalcs() {
     */
 }
 
-void RunMotor(int speed) {
+void RunMotor(int speed, bool brake=true) {
   //Serial.print("Motor speed "); Serial.println(speed);
   if (speed > MOTOR_OUTPUT_MIN) {
-    digitalWrite(MOTOR_PIN_A, HIGH); 
+    if (brake) {
+      digitalWrite(MOTOR_PIN_A, HIGH); 
+    } else {
+      digitalWrite(MOTOR_PIN_A, LOW); 
+    }
     analogWrite(MOTOR_PIN_B, 255-speed);
   } else if (speed < MOTOR_OUTPUT_MIN) {
+    if (brake) {
+      digitalWrite(MOTOR_PIN_B, HIGH);
+    } else {
+      digitalWrite(MOTOR_PIN_B, LOW);
+    }
     analogWrite(MOTOR_PIN_A, 255+speed);
-    digitalWrite(MOTOR_PIN_B, HIGH); 
   } else {
-    digitalWrite(MOTOR_PIN_A, HIGH);
-    digitalWrite(MOTOR_PIN_B, HIGH);
+    if (brake) {
+      digitalWrite(MOTOR_PIN_A, HIGH);
+      digitalWrite(MOTOR_PIN_B, HIGH);
+    } else {
+      digitalWrite(MOTOR_PIN_A, LOW);
+      digitalWrite(MOTOR_PIN_B, LOW);
+    }
   }
   
   return;
 }
 
 void DoMotor() {
-  // Adjusts speed if necessary
+  // Ramp speed to Set Point
+  if (speed_go) {
+    if (micros() >= loop_speed_step) {
+      if (abs(speed_cur) < abs(speed_set)) {
+        if (speed_dir) {
+          speed_cur = speed_cur + SPEED_STEP;
+        } else {
+          speed_cur = speed_cur - SPEED_STEP;
+        }
+        RunMotor(speed_cur);
+        loop_speed_step = micros() + SPEED_RUN_STEP;
+      }
+    }
+  }
+
+  // Change Speed Set Point
   if (micros() >= loop_speed_next) {
     if (speed_go) {
       // Stop
       speed_go = false;
+      speed_set = 0;
       speed_cur = 0;
+      //speed_cur = speed_set;
       RunMotor(speed_cur);
       loop_speed_next = micros() + SPEED_RUN_STOP;
       display_force = true;
@@ -113,8 +147,7 @@ void DoMotor() {
           speed_dir = true;
         }
       }
-      speed_cur = speed_temp;
-      RunMotor(speed_cur);
+      speed_set = speed_temp;
       loop_speed_next = micros() + SPEED_RUN_GO;
       display_force = true;
     }
@@ -156,6 +189,7 @@ void setup() {
       while (1) { delay(10); }
     }
 
+  loop_speed_next = micros() + 1000000; // Wait 1second before moving motor
 }
 
 void loop() {
