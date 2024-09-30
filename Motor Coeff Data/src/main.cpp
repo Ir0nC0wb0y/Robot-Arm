@@ -46,10 +46,11 @@
   #define SPEED_CHANGE 5
   bool speed_dir = true;
   bool speed_go = false;
+  bool speed_reached = false;
   #define SPEED_STEP           1
   #define SPEED_RUN_STEP    1000
-  #define SPEED_RUN_GO    500000
-  #define SPEED_RUN_STOP  500000
+  #define SPEED_RUN_GO    100000
+  #define SPEED_RUN_STOP  100000
   unsigned long loop_speed_next = 0;
   unsigned long loop_speed_step = 0;
   
@@ -105,31 +106,13 @@ void RunMotor(int speed, bool brake=true) {
 }
 
 void DoMotor() {
-  // Ramp speed to Set Point
-  if (speed_go) {
-    if (micros() >= loop_speed_step) {
-      if (abs(speed_cur) < abs(speed_set)) {
-        if (speed_dir) {
-          speed_cur = speed_cur + SPEED_STEP;
-        } else {
-          speed_cur = speed_cur - SPEED_STEP;
-        }
-        RunMotor(speed_cur);
-        loop_speed_step = micros() + SPEED_RUN_STEP;
-      }
-    }
-  }
-
   // Change Speed Set Point
-  if (micros() >= loop_speed_next) {
+  if (micros() >= loop_speed_next && speed_reached) {
     if (speed_go) {
       // Stop
       speed_go = false;
       speed_set = 0;
-      speed_cur = 0;
-      //speed_cur = speed_set;
-      RunMotor(speed_cur);
-      loop_speed_next = micros() + SPEED_RUN_STOP;
+      //loop_speed_next = micros() + SPEED_RUN_STOP;
       display_force = true;
     } else {
       // Go new speed
@@ -148,8 +131,53 @@ void DoMotor() {
         }
       }
       speed_set = speed_temp;
-      loop_speed_next = micros() + SPEED_RUN_GO;
+      //loop_speed_next = micros() + SPEED_RUN_GO;
       display_force = true;
+    }
+    speed_reached = false;
+  }
+
+  // Ramp speed to Set Point
+  if (!speed_reached) {
+    //Serial.print("1 Speed not reached: "); Serial.println(!speed_reached);
+    if (speed_go) {
+      //Serial.print("1.1 Speed Forward: "); Serial.println(speed_go);
+      if (micros() >= loop_speed_step) {
+        //Serial.println("1.1.1 Speed Step Timing");
+        if (abs(speed_cur) < abs(speed_set)) {
+          //Serial.println("1.1.1.1 Change Speed");
+          if (speed_dir) {
+            speed_cur = speed_cur + SPEED_STEP;
+          } else {
+            speed_cur = speed_cur - SPEED_STEP;
+          }
+          RunMotor(speed_cur);
+          loop_speed_step = micros() + SPEED_RUN_STEP;
+        } else {
+          //Serial.println("1.1.1.2 Speed Reached");
+          loop_speed_next = micros() + SPEED_RUN_GO;
+          speed_reached = true;
+        }
+      }
+    } else {
+      //Serial.print("1.2 Reverse: "); Serial.println(!speed_go);
+      if (micros() >= loop_speed_step) {
+        //Serial.println("1.2.1 Speed Step");
+        if (abs(speed_cur) > 0) {
+          //Serial.println("1.2.1.1 Change Speed");
+          if (speed_dir) {
+            speed_cur = speed_cur - SPEED_STEP;
+          } else {
+            speed_cur = speed_cur + SPEED_STEP;
+          }
+          RunMotor(speed_cur);
+          loop_speed_step = micros() + SPEED_RUN_STEP;
+        } else {
+          //Serial.println("1.2.1.2 Speed Reached");
+          loop_speed_next = micros() + SPEED_RUN_STOP;
+          speed_reached = true;
+        }
+      }
     }
   }
 }
@@ -189,7 +217,7 @@ void setup() {
       while (1) { delay(10); }
     }
 
-  loop_speed_next = micros() + 1000000; // Wait 1second before moving motor
+  loop_speed_next = micros() + 10000000; // Wait 10 seconds before moving motor
 }
 
 void loop() {
