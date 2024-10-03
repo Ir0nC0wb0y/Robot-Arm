@@ -51,7 +51,7 @@
   bool speed_reached = false;
   //#define SPEED_STEP           1
   //#define SPEED_RUN_STEP    1000
-  #define SPEED_RUN_GO    100000
+  #define SPEED_RUN_GO   5000000
   #define SPEED_RUN_STOP  100000
   #define SPEED_TIME_MIN    5000
   #define SPEED_TIME_MAX  300000
