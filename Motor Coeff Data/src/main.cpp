@@ -40,19 +40,24 @@
   bool display_force = false;
 
   // Speed
-  int speed_set = 0;
+  int speed_start = 0;
+  int speed_end   = 0;
   int speed_cur = 0;
-  int speed_temp = 0;
-  #define SPEED_CHANGE 5
+  double speed_calc_slope = 0.0;
+  //int speed_temp = 0;
+  //#define SPEED_CHANGE 5
   bool speed_dir = true;
   bool speed_go = false;
   bool speed_reached = false;
-  #define SPEED_STEP           1
-  #define SPEED_RUN_STEP    1000
+  //#define SPEED_STEP           1
+  //#define SPEED_RUN_STEP    1000
   #define SPEED_RUN_GO    100000
   #define SPEED_RUN_STOP  100000
-  unsigned long loop_speed_next = 0;
-  unsigned long loop_speed_step = 0;
+  #define SPEED_TIME_MIN    5000
+  #define SPEED_TIME_MAX  300000
+  unsigned long loop_speed_next  = 0;
+  unsigned long loop_speed_start = 0;
+  unsigned long loop_speed_end   = 0;
   
     
 
@@ -106,7 +111,7 @@ void RunMotor(int speed, bool brake=true) {
 }
 
 void DoMotor() {
-  // Change Speed Set Point
+  /*// Change Speed Set Point
   if (micros() >= loop_speed_next && speed_reached) {
     if (speed_go) {
       // Stop
@@ -135,9 +140,9 @@ void DoMotor() {
       display_force = true;
     }
     speed_reached = false;
-  }
+  }*/
 
-  // Ramp speed to Set Point
+  /*// Ramp speed to Set Point
   if (!speed_reached) {
     //Serial.print("1 Speed not reached: "); Serial.println(!speed_reached);
     if (speed_go) {
@@ -179,7 +184,48 @@ void DoMotor() {
         }
       }
     }
+  }*/
+
+  // interpolate speed from Start/End
+  //Serial.print("Running DoMotor,");
+  unsigned long cur_time = micros();
+  double speed_double = speed_end;
+  if (cur_time > loop_speed_end) {
+    speed_cur = speed_end;
+  } else {
+    speed_double = ((float)(cur_time - loop_speed_start))*speed_calc_slope + (float)speed_start;
+    //speed_cur = (cur_time - loop_speed_start)*((speed_end - speed_start)/(loop_speed_end - loop_speed_start)) + speed_start;
+    speed_cur = (int)speed_double;
   }
+  
+  if (speed_cur > 255){
+    speed_cur = 255;
+    //Serial.println("Speed out of bounds");
+  } else if (speed_cur < -255) {
+    speed_cur = -255;
+    //Serial.println("Speed out of bounds");
+  }
+  RunMotor(speed_cur);
+  //Serial.print(" complete. New speed (double, float): ");
+  //  Serial.print(speed_double);
+  //  Serial.print(", ");
+  //  Serial.print(speed_cur);
+  //  Serial.println();
+}
+
+void MotorSetpoint(int speed, int duration) {
+  Serial.print("Received new setpoint, speed, duration: ");
+    Serial.print(speed);
+    Serial.print(", ");
+    Serial.println(duration);
+
+  speed_start = speed_cur;
+  speed_end = speed;
+  loop_speed_start = micros();
+  loop_speed_end   = loop_speed_start + duration;
+  speed_calc_slope = (float)(speed_end - speed_start) / (float)(loop_speed_end - loop_speed_start);
+  Serial.print("Calc'd Final Speed: ");
+    Serial.println(((float)(speed_end - speed_start)) * speed_calc_slope + (float)speed_start);
 }
 
 void CurrentSense() {
@@ -217,20 +263,43 @@ void setup() {
       while (1) { delay(10); }
     }
 
-  loop_speed_next = micros() + 10000000; // Wait 10 seconds before moving motor
+  //loop_speed_next = micros() + 1000000; // Wait 10 seconds before moving motor
 }
 
 void loop() {
+
+  if (micros() >= loop_speed_next ) {
+    //Serial.println("Calculating new Setpoint");
+    if (speed_go) {
+      // Motor Running, Stop Motor
+      //Serial.println("Motor Running, Stop Motor");
+      unsigned long setpoint_rampup = random(SPEED_TIME_MIN,SPEED_TIME_MAX);
+      MotorSetpoint(0, setpoint_rampup);
+      loop_speed_next = micros() + setpoint_rampup + SPEED_RUN_STOP;
+      speed_go = false;
+    } else {
+      // Motor Stopped, get going!
+      //Serial.println("Motor Stopped, get going!");
+      unsigned long setpoint_rampup = random(SPEED_TIME_MIN,SPEED_TIME_MAX);
+      MotorSetpoint(255, setpoint_rampup);
+      loop_speed_next = micros() + setpoint_rampup + SPEED_RUN_GO;
+      speed_go = true;
+    }
+  }
 
   DoMotor();
 
       
   if (micros() - loop_display_last >= DISPLAY_WAIT_TIME || display_force) {
+    unsigned long perf_angle = micros();
     AngleCalcs();
+    perf_angle = micros() - perf_angle;
+    unsigned long perf_current = micros();
     CurrentSense();
+    perf_current = micros() - perf_current;
 
     if (header_display >= HEADER_COUNT) {
-      Serial.println("Time [us]|PWM|Encoder Counts|Angle|Current[mA]");
+      Serial.println("Time [us]|PWM|Encoder Counts|Angle|Current[mA]|Perf Angle [us]|Perf Current[us]");
       header_display = 0;
     } else {
       header_display++;
@@ -245,6 +314,10 @@ void loop() {
       Serial.print(output_angle);
       Serial.print("|");
       Serial.print(current_mA);
+      Serial.print("|");
+      Serial.print(perf_angle);
+      Serial.print("|");
+      Serial.print(perf_current);
       Serial.println();
       
     
