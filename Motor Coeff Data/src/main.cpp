@@ -20,7 +20,7 @@
   #define MOTOR_PIN_B D8
   #define MOTOR_OUTPUT_MIN 0
   #define ENCODER_CPR 48.0
-  #define MOTOR_GEARING 9.6
+  #define MOTOR_GEARING 264
 
 // Current Sensor
   Adafruit_INA219 ina219;
