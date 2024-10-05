@@ -3,17 +3,25 @@
 #include <ArduPID.h>
 #include <Wire.h>
 #include <Adafruit_INA219.h>
+#include <AS5600.h>
 
 
-// Encoder
+// Encoder (Input)
   #define ENCODER_PIN_A D2
   #define ENCODER_PIN_B D3
   PioEncoder encoder(D2); // Encoder on Pins 1/2 (must be sequential)
-  int enc_position = 0;
-  double output_angle = 0.0;
-  double output_speed = 0;
-  double output_angle_last = 0;
-  unsigned long enc_last_time = 0;
+  class OutputAngle {
+    public:
+      int encoder_position = 0;
+      double output_angle = 0.0;
+      //double output_speed = 0.0;
+      //double output_angle_last = 0.0;
+      //unsigned long last_time = 0;
+  };
+  OutputAngle angle_before;
+  OutputAngle angle_after;
+// Encoder (Output)
+  AS5600L as5600;
 
 // Motor
   #define MOTOR_PIN_A D9
@@ -34,10 +42,11 @@
 // Loop
   // Display
   unsigned long loop_display_last = 0;
-  #define DISPLAY_WAIT_TIME 100
+  #define DISPLAY_WAIT_TIME 2000
   int header_display = 0;
   #define HEADER_COUNT 200
   bool display_force = false;
+  int motor_loop = 0;
 
   // Speed
   int speed_start = 0;
@@ -52,33 +61,53 @@
   //#define SPEED_STEP           1
   //#define SPEED_RUN_STEP    1000
   #define SPEED_RUN_GO   5000000
-  #define SPEED_RUN_STOP  100000
-  #define SPEED_TIME_MIN    5000
-  #define SPEED_TIME_MAX  300000
+  #define SPEED_RUN_STOP  250000
+  #define SPEED_TIME_MIN  100000
+  #define SPEED_TIME_MAX 1000000
   unsigned long loop_speed_next  = 0;
   unsigned long loop_speed_start = 0;
   unsigned long loop_speed_end   = 0;
   
-    
+OutputAngle AngleOutput(OutputAngle input_angle) {
+  int32_t enc_position = as5600.getCumulativePosition();
 
-void AngleCalcs() {
-    // Get encoder position
-    enc_position = encoder.getCount();
-    //unsigned long encoder_time = micros();
-    
-    // Calculate Angle @ output
-    output_angle = (double)enc_position / (ENCODER_CPR * MOTOR_GEARING); // [%rotation]
-    output_angle = 360.0 * output_angle; // [deg]
+  // Calculate Angle @ output
+  double calc_output_angle = (double)enc_position / (ENCODER_CPR * MOTOR_GEARING); // [%rotation]
+  calc_output_angle = 360.0 * calc_output_angle; // [deg]
 
-    /*
-    // Calculate rotation speed @output
-    output_speed = (output_angle - output_angle_last) / (double)(encoder_time - enc_last_time); // [deg/us]
-    output_speed = output_speed * 166666.6666666667; // Convert to [rpm]
+  // Set output class
+  OutputAngle output_angle;
+  output_angle.encoder_position = enc_position;
+  output_angle.output_angle = calc_output_angle;
 
-    // Collect previous values
-    output_angle_last = output_angle;
-    enc_last_time = encoder_time;
-    */
+  return output_angle;
+}
+
+OutputAngle AngleInput(OutputAngle input_angle) {
+  // Get encoder position
+  int enc_position = encoder.getCount();
+  //unsigned long encoder_time = micros();
+  
+  // Calculate Angle @ output
+  double calc_output_angle = (double)enc_position / (ENCODER_CPR * MOTOR_GEARING); // [%rotation]
+  calc_output_angle = 360.0 * calc_output_angle; // [deg]
+
+  /*
+  // Calculate rotation speed @output
+  output_speed = (output_angle - output_angle_last) / (double)(encoder_time - enc_last_time); // [deg/us]
+  output_speed = output_speed * 166666.6666666667; // Convert to [rpm]
+
+  // Collect previous values
+  output_angle_last = output_angle;
+  enc_last_time = encoder_time;
+  */
+
+  // Set output class
+  OutputAngle output_angle;
+  output_angle.encoder_position = enc_position;
+  output_angle.output_angle = calc_output_angle;
+
+  return output_angle;
 }
 
 void RunMotor(int speed, bool brake=true) {
@@ -263,7 +292,13 @@ void setup() {
       while (1) { delay(10); }
     }
 
-  //loop_speed_next = micros() + 1000000; // Wait 10 seconds before moving motor
+  // Output Encoder
+    as5600.begin();
+    if (!as5600.isConnected()) {
+      Serial.println("AS5600 is not connected");
+      while (1) {delay(10);}
+    }
+
 }
 
 void loop() {
@@ -272,34 +307,39 @@ void loop() {
     //Serial.println("Calculating new Setpoint");
     if (speed_go) {
       // Motor Running, Stop Motor
-      //Serial.println("Motor Running, Stop Motor");
       unsigned long setpoint_rampup = random(SPEED_TIME_MIN,SPEED_TIME_MAX);
       MotorSetpoint(0, setpoint_rampup);
       loop_speed_next = micros() + setpoint_rampup + SPEED_RUN_STOP;
       speed_go = false;
     } else {
       // Motor Stopped, get going!
-      //Serial.println("Motor Stopped, get going!");
       unsigned long setpoint_rampup = random(SPEED_TIME_MIN,SPEED_TIME_MAX);
-      MotorSetpoint(255, setpoint_rampup);
+      if (!speed_dir) {
+        MotorSetpoint(255, setpoint_rampup);
+        speed_dir = true;
+      } else {
+        MotorSetpoint(-255, setpoint_rampup);
+        speed_dir = false;
+      }
       loop_speed_next = micros() + setpoint_rampup + SPEED_RUN_GO;
       speed_go = true;
     }
   }
 
   DoMotor();
+  motor_loop++;
 
       
   if (micros() - loop_display_last >= DISPLAY_WAIT_TIME || display_force) {
-    unsigned long perf_angle = micros();
-    AngleCalcs();
-    perf_angle = micros() - perf_angle;
+    loop_display_last = micros();
+    angle_before = AngleInput(angle_before);
     unsigned long perf_current = micros();
     CurrentSense();
     perf_current = micros() - perf_current;
+    angle_after = AngleInput(angle_after);
 
     if (header_display >= HEADER_COUNT) {
-      Serial.println("Time [us]|PWM|Encoder Counts|Angle|Current[mA]|Perf Angle [us]|Perf Current[us]");
+      Serial.println("Time [us]|PWM|Encoder Before|Angle Before|Current[mA]|Encoder After|Angle After|Perf Angle [us]|Perf Current[us]|motor loop count");
       header_display = 0;
     } else {
       header_display++;
@@ -309,20 +349,23 @@ void loop() {
       Serial.print("|");
       Serial.print(speed_cur);
       Serial.print("|");
-      Serial.print(enc_position);
+      Serial.print(angle_before.encoder_position);
       Serial.print("|");
-      Serial.print(output_angle);
+      Serial.print(angle_before.output_angle);
       Serial.print("|");
       Serial.print(current_mA);
       Serial.print("|");
-      Serial.print(perf_angle);
+      Serial.print(angle_after.encoder_position);
+      Serial.print("|");
+      Serial.print(angle_after.output_angle);
       Serial.print("|");
       Serial.print(perf_current);
+      Serial.print("|");
+      Serial.print(motor_loop);
       Serial.println();
-      
-    
-    loop_display_last = micros();
+
     display_force = false;
+    motor_loop = 0;
   }
  
 }
