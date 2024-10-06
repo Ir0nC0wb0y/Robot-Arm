@@ -22,6 +22,8 @@
   OutputAngle angle_after;
 // Encoder (Output)
   AS5600L as5600;
+  #define MAGNET_OFFSET  0.0 //Range -359.99 to +359.99
+  OutputAngle angle_output;
 
 // Motor
   #define MOTOR_PIN_A D9
@@ -298,6 +300,7 @@ void setup() {
       Serial.println("AS5600 is not connected");
       while (1) {delay(10);}
     }
+    as5600.setOffset(MAGNET_OFFSET);
 
 }
 
@@ -337,9 +340,13 @@ void loop() {
     CurrentSense();
     perf_current = micros() - perf_current;
     angle_after = AngleInput(angle_after);
+    unsigned long perf_output = micros();
+    angle_output = AngleOutput(angle_output);
+    perf_output = micros() - perf_output;
+
 
     if (header_display >= HEADER_COUNT) {
-      Serial.println("Time [us]|PWM|Encoder Before|Angle Before|Current[mA]|Encoder After|Angle After|Perf Angle [us]|Perf Current[us]|motor loop count");
+      Serial.println("Time [us]|PWM|Encoder Before|Angle Before|Current[mA]|Encoder After|Angle After|Perf Angle [us]|Perf Current[us]|motor loop count|Perf Output[us]");
       header_display = 0;
     } else {
       header_display++;
@@ -362,6 +369,8 @@ void loop() {
       Serial.print(perf_current);
       Serial.print("|");
       Serial.print(motor_loop);
+      Serial.print("|");
+      Serial.print(perf_output);
       Serial.println();
 
     display_force = false;
