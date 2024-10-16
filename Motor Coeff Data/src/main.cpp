@@ -303,6 +303,7 @@ void setup() {
       while (1) { delay(10); }
     } else {
       Serial.println("INA219 Connected!");
+      ina219.setCalibration_manual(409, 1, 20, 0, 3, 1, 1, 5);
     }
 
   // Output Encoder
