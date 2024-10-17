@@ -35,9 +35,9 @@
 
 // Current Sensor
   Adafruit_INA219 ina219(0x45);
-  //float shuntvoltage = 0;
-  //float busvoltage = 0;
-  float current_mA = 0;
+  float shuntvoltage = 0;
+  float busvoltage = 0;
+  //float current_mA = 0;
   //float loadvoltage = 0;
   //float power_mW = 0;
 
@@ -46,8 +46,8 @@
   // Display
   unsigned long loop_display_last = 0;
   #define DISPLAY_WAIT_TIME  2000 //Output angle and current, [us]
-  int header_display = 0;
   #define HEADER_COUNT 200
+  int header_display = HEADER_COUNT;
   bool display_force = false;
   int motor_loop = 0;
 
@@ -264,9 +264,9 @@ void MotorSetpoint(int speed, int duration) {
 
 
 void CurrentSense() {
-  //shuntvoltage = ina219.getShuntVoltage_mV();
+  shuntvoltage = ina219.getShuntVoltage_raw();
   //busvoltage = ina219.getBusVoltage_V();
-  current_mA = ina219.getCurrent_mA();
+  //current_mA = ina219.getCurrent_mA();
   //power_mW = ina219.getPower_mW();
   //loadvoltage = busvoltage + (shuntvoltage / 1000);
 }
@@ -303,7 +303,13 @@ void setup() {
       while (1) { delay(10); }
     } else {
       Serial.println("INA219 Connected!");
-      ina219.setCalibration_manual(409, 1, 20, 0, 3, 1, 1, 5);
+      ina219.getConfigRegister();
+      ina219.setCalibration_manual(8000, 10, 2, 0, 3, 1, 1, 5);
+      unsigned long wait_time = micros();
+      while (micros() - wait_time < 4) {
+        yield();
+      }
+      ina219.getConfigRegister();
     }
 
   // Output Encoder
@@ -376,7 +382,7 @@ void loop() {
     perf_output = micros() - perf_output;
 
     if (header_display >= HEADER_COUNT) {
-      Serial.println("Time [us]|PWM|Current[mA]|Read Angle[count]|getCumPosition[deg]|Perf Output Angle[us]|Perf Current [us]");
+      Serial.println("Time [us]|PWM|Current[mA]|shuntvoltage|busvoltage|Perf Current [us]");
       header_display = 0;
     } else {
       header_display++;
@@ -390,19 +396,19 @@ void loop() {
       //Serial.print("|");
       //Serial.print(angle_before.output_angle);
       Serial.print("|");
-      Serial.print(current_mA);
+      Serial.print(shuntvoltage);
       //Serial.print("|");
       //Serial.print(angle_after.encoder_position);
       //Serial.print("|");
       //Serial.print(angle_after.output_angle);
-      Serial.print("|");
-      Serial.print(angle_output.raw);
-      Serial.print("|");
-      Serial.print(angle_output.angle);
+      //Serial.print("|");
+      //Serial.print(angle_output.raw);
+      //Serial.print("|");
+      //Serial.print(angle_output.angle);
       //Serial.print("|");
       //Serial.print(motor_loop);
-      Serial.print("|");
-      Serial.print(perf_output);
+      //Serial.print("|");
+      //Serial.print(perf_output);
       Serial.print("|");
       Serial.print(perf_current);
       Serial.println();
