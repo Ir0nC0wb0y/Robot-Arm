@@ -2,7 +2,7 @@
 #include <pio_encoder.h>
 #include <ArduPID.h>
 #include <Wire.h>
-#include <Adafruit_INA219.h>
+#include <INA219.h>
 #include <AS5600.h>
 
 
@@ -34,13 +34,10 @@
   #define MOTOR_GEARING 264
 
 // Current Sensor
-  Adafruit_INA219 ina219(0x45);
-  float shuntvoltage = 0;
-  float busvoltage = 0;
-  //float current_mA = 0;
-  //float loadvoltage = 0;
-  //float power_mW = 0;
-
+  #define INA219_ADDRESS 0x45
+  INA219 INA(INA219_ADDRESS);
+  float current_mA = 0.0;
+  //float shunt_mV = 0.0;
 
 // Loop
   // Display
@@ -145,81 +142,6 @@ void RunMotor(int speed, bool brake=true) {
 }
 
 void DoMotor() {
-  /*// Change Speed Set Point
-  if (micros() >= loop_speed_next && speed_reached) {
-    if (speed_go) {
-      // Stop
-      speed_go = false;
-      speed_set = 0;
-      //loop_speed_next = micros() + SPEED_RUN_STOP;
-      display_force = true;
-    } else {
-      // Go new speed
-      speed_go = true;
-      if (speed_dir) {
-        speed_temp = speed_temp + SPEED_CHANGE;
-        if (speed_temp > 255) {
-          speed_temp = -SPEED_CHANGE;
-          speed_dir = false;
-        }
-      } else {
-        speed_temp = speed_temp - SPEED_CHANGE;
-        if (speed_temp < -255) {
-          speed_temp = SPEED_CHANGE;
-          speed_dir = true;
-        }
-      }
-      speed_set = speed_temp;
-      //loop_speed_next = micros() + SPEED_RUN_GO;
-      display_force = true;
-    }
-    speed_reached = false;
-  }*/
-
-  /*// Ramp speed to Set Point
-  if (!speed_reached) {
-    //Serial.print("1 Speed not reached: "); Serial.println(!speed_reached);
-    if (speed_go) {
-      //Serial.print("1.1 Speed Forward: "); Serial.println(speed_go);
-      if (micros() >= loop_speed_step) {
-        //Serial.println("1.1.1 Speed Step Timing");
-        if (abs(speed_cur) < abs(speed_set)) {
-          //Serial.println("1.1.1.1 Change Speed");
-          if (speed_dir) {
-            speed_cur = speed_cur + SPEED_STEP;
-          } else {
-            speed_cur = speed_cur - SPEED_STEP;
-          }
-          RunMotor(speed_cur);
-          loop_speed_step = micros() + SPEED_RUN_STEP;
-        } else {
-          //Serial.println("1.1.1.2 Speed Reached");
-          loop_speed_next = micros() + SPEED_RUN_GO;
-          speed_reached = true;
-        }
-      }
-    } else {
-      //Serial.print("1.2 Reverse: "); Serial.println(!speed_go);
-      if (micros() >= loop_speed_step) {
-        //Serial.println("1.2.1 Speed Step");
-        if (abs(speed_cur) > 0) {
-          //Serial.println("1.2.1.1 Change Speed");
-          if (speed_dir) {
-            speed_cur = speed_cur - SPEED_STEP;
-          } else {
-            speed_cur = speed_cur + SPEED_STEP;
-          }
-          RunMotor(speed_cur);
-          loop_speed_step = micros() + SPEED_RUN_STEP;
-        } else {
-          //Serial.println("1.2.1.2 Speed Reached");
-          loop_speed_next = micros() + SPEED_RUN_STOP;
-          speed_reached = true;
-        }
-      }
-    }
-  }*/
-
   // interpolate speed from Start/End
   //Serial.print("Running DoMotor,");
   unsigned long cur_time = micros();
@@ -264,11 +186,8 @@ void MotorSetpoint(int speed, int duration) {
 
 
 void CurrentSense() {
-  shuntvoltage = ina219.getShuntVoltage_raw();
-  //busvoltage = ina219.getBusVoltage_V();
-  //current_mA = ina219.getCurrent_mA();
-  //power_mW = ina219.getPower_mW();
-  //loadvoltage = busvoltage + (shuntvoltage / 1000);
+  current_mA = INA.getCurrent_mA();
+  //shunt_mV = INA.getShuntVoltage_mV();
 }
 
 
@@ -298,18 +217,27 @@ void setup() {
   Wire.setSDA(D4);
   Wire.begin();
   // Current Sensor
-    if (! ina219.begin()) {
-      Serial.println("Failed to find INA219 chip");
-      while (1) { delay(10); }
+    if (!INA.begin())  {
+      Serial.println("INA219 could not connect. Fix and Reboot");
     } else {
-      Serial.println("INA219 Connected!");
-      ina219.getConfigRegister();
-      ina219.setCalibration_manual(8000, 10, 2, 0, 3, 1, 1, 5);
-      unsigned long wait_time = micros();
-      while (micros() - wait_time < 4) {
-        yield();
-      }
-      ina219.getConfigRegister();
+      INA.setMaxCurrentShunt(3,0.1);
+      INA.setBusVoltageRange(16);
+      INA.setGain(8);
+      INA.setBusResolution(10);
+      INA.setShuntResolution(10);
+      INA.setModeShuntContinuous();
+
+      Serial.print("CALI:\t");
+      Serial.println(INA.isCalibrated());
+      Serial.print("CLSB:\t");
+      Serial.println(INA.getCurrentLSB(),5);
+      Serial.print("SHUNT:\t");
+      Serial.println(INA.getShunt(), 4);
+      Serial.print("MAXC:\t");
+      Serial.println(INA.getMaxCurrent(), 4);
+      Serial.print("Shunt ADC:\t");
+      Serial.println(INA.getShuntADC());
+      
     }
 
   // Output Encoder
@@ -382,7 +310,7 @@ void loop() {
     perf_output = micros() - perf_output;
 
     if (header_display >= HEADER_COUNT) {
-      Serial.println("Time [us]|PWM|Current[mA]|shuntvoltage|busvoltage|Perf Current [us]");
+      Serial.println("Time [us]|PWM|Current [mA]|Perf Current [us]|Angle [deg]|Perf Angle [us]");
       header_display = 0;
     } else {
       header_display++;
@@ -391,26 +319,14 @@ void loop() {
     Serial.print(micros());
       Serial.print("|");
       Serial.print(speed_cur);
-      //Serial.print("|");
-      //Serial.print(angle_before.encoder_position);
-      //Serial.print("|");
-      //Serial.print(angle_before.output_angle);
       Serial.print("|");
-      Serial.print(shuntvoltage);
-      //Serial.print("|");
-      //Serial.print(angle_after.encoder_position);
-      //Serial.print("|");
-      //Serial.print(angle_after.output_angle);
-      //Serial.print("|");
-      //Serial.print(angle_output.raw);
-      //Serial.print("|");
-      //Serial.print(angle_output.angle);
-      //Serial.print("|");
-      //Serial.print(motor_loop);
-      //Serial.print("|");
-      //Serial.print(perf_output);
+      Serial.print(current_mA,0);
       Serial.print("|");
       Serial.print(perf_current);
+      Serial.print("|");
+      Serial.print(angle_output.angle);
+      Serial.print("|");
+      Serial.print(perf_output);
       Serial.println();
 
     display_force = false;
