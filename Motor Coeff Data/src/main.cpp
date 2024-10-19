@@ -26,7 +26,7 @@
   #define ENCODER_OFFSET 0.0
   AS5600L as5600;
   OutputAngle angle_output;
-  #define PRINT_ENCODER_INFO true
+  #define PRINT_ENCODER_INFO false
 
 // Motor
   #define MOTOR_PIN_A D9
@@ -42,7 +42,7 @@
   //float shunt_mV = 0.0;
 
 // RP2040 PWM
-  float frequency = 20000.0; // Frequency, in Hz
+  float frequency = 25000.0; // Frequency, in Hz
   float dutyCycle_A = 0.0;
   float dutyCycle_B = 0.0;
   RP2040_PWM* PWM_Instance[2];
@@ -50,7 +50,7 @@
 // Loop
   // Display
   unsigned long loop_display_last = 0;
-  #define DISPLAY_WAIT_TIME  2000 //Output angle and current, [us]
+  #define DISPLAY_WAIT_TIME  500 //Output angle and current, [us]
   #define HEADER_COUNT 200
   int header_display = HEADER_COUNT;
   bool display_force = false;
@@ -61,7 +61,7 @@
   float speed_end   = 0;
   float speed_cur = 0;
   float speed_calc_slope = 0.0;
-  #define SPEED_MAX 100.0
+  #define SPEED_MAX 90.0
   //int speed_temp = 0;
   //#define SPEED_CHANGE 5
   bool speed_dir = true;
@@ -69,13 +69,15 @@
   bool speed_reached = false;
   //#define SPEED_STEP           1
   //#define SPEED_RUN_STEP    1000
-  #define SPEED_RUN_GO   5000000
-  #define SPEED_RUN_STOP  250000
-  #define SPEED_TIME_MIN  100000
-  #define SPEED_TIME_MAX 1000000
+  #define SPEED_RUN_GO     5000000
+  #define SPEED_RUN_STOP   1000000
+  #define SPEED_TIME_MIN    100000
+  #define SPEED_TIME_MAX  10000000
   unsigned long loop_speed_next  = 0;
   unsigned long loop_speed_start = 0;
   unsigned long loop_speed_end   = 0;
+  int freq_tries = 0;
+  #define FREQ_TIMES 2
   
 OutputAngle AngleOutput(OutputAngle input_angle) {
   int32_t enc_position = as5600.getCumulativePosition();
@@ -127,14 +129,14 @@ void RunMotor_RP2040(float speed, bool brake=true) {
     } else {
       PWM_Instance[0]->setPWM(MOTOR_PIN_A, frequency, 0.0);
     }
-    PWM_Instance[1]->setPWM(MOTOR_PIN_B, frequency, SPEED_MAX-speed);
+    PWM_Instance[1]->setPWM(MOTOR_PIN_B, frequency, 100.0-speed);
   } else if (speed < -MOTOR_OUTPUT_MIN) {
     if (brake) {
       PWM_Instance[1]->setPWM(MOTOR_PIN_B, frequency, 100.0);
     } else {
       PWM_Instance[1]->setPWM(MOTOR_PIN_B, frequency, 0.0);
     }
-    PWM_Instance[0]->setPWM(MOTOR_PIN_A, frequency, SPEED_MAX+speed);
+    PWM_Instance[0]->setPWM(MOTOR_PIN_A, frequency, 100.0+speed);
   } else {
     if (brake) {
       PWM_Instance[0]->setPWM(MOTOR_PIN_A, frequency, 100.0);
@@ -356,7 +358,7 @@ void loop() {
     perf_output = micros() - perf_output;
 
     if (header_display >= HEADER_COUNT) {
-      Serial.println("Time [us]|PWM|Current [mA]|Perf Current [us]|Angle [deg]|Perf Angle [us]");
+      Serial.println("Time [us]|PWM|Frequency|Current [mA]|Perf Current [us]|Angle [deg]|Perf Angle [us]");
       header_display = 0;
     } else {
       header_display++;
@@ -365,6 +367,8 @@ void loop() {
     Serial.print(micros());
       Serial.print("|");
       Serial.print(speed_cur, 3);
+      Serial.print("|");
+      Serial.print(frequency,0);
       Serial.print("|");
       Serial.print(current_mA,0);
       Serial.print("|");
