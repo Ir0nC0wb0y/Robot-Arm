@@ -50,7 +50,7 @@
 // Loop
   // Display
   unsigned long loop_display_last = 0;
-  #define DISPLAY_WAIT_TIME  2500 //Output angle and current, [us]
+  #define DISPLAY_WAIT_TIME  5000 //Output angle and current, [us]
   #define HEADER_COUNT 200
   int header_display = HEADER_COUNT;
   bool display_force = false;
@@ -61,7 +61,7 @@
   float speed_end   = 0;
   float speed_cur = 0;
   float speed_calc_slope = 0.0;
-  #define SPEED_MAX 90.0
+  #define SPEED_MAX 100.0
   //int speed_temp = 0;
   //#define SPEED_CHANGE 5
   bool speed_dir = true;
