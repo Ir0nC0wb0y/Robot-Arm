@@ -1,6 +1,6 @@
 #include <Arduino.h>
-#include <pio_encoder.h>
-#include <ArduPID.h>
+//#include <pio_encoder.h>
+//#include <ArduPID.h>
 #include <Wire.h>
 #include <INA219.h>
 #include <AS5600.h>
@@ -9,7 +9,7 @@
 // Encoder (Input)
   #define ENCODER_PIN_A D2
   #define ENCODER_PIN_B D3
-  PioEncoder encoder(D2); // Encoder on Pins 1/2 (must be sequential)
+  //PioEncoder encoder(D2); // Encoder on Pins 1/2 (must be sequential)
   class OutputAngle {
     public:
       int raw = 0;
@@ -85,6 +85,7 @@ OutputAngle AngleOutput(OutputAngle input_angle) {
   return output_angle;
 }
 
+/*
 OutputAngle AngleInput(OutputAngle input_angle) {
   // Get encoder position
   int enc_position = encoder.getCount();
@@ -94,7 +95,6 @@ OutputAngle AngleInput(OutputAngle input_angle) {
   double calc_output_angle = (double)enc_position / (ENCODER_CPR * MOTOR_GEARING); // [%rotation]
   calc_output_angle = 360.0 * calc_output_angle; // [deg]
 
-  /*
   // Calculate rotation speed @output
   output_speed = (output_angle - output_angle_last) / (double)(encoder_time - enc_last_time); // [deg/us]
   output_speed = output_speed * 166666.6666666667; // Convert to [rpm]
@@ -102,7 +102,6 @@ OutputAngle AngleInput(OutputAngle input_angle) {
   // Collect previous values
   output_angle_last = output_angle;
   enc_last_time = encoder_time;
-  */
 
   // Set output class
   OutputAngle output_angle;
@@ -111,6 +110,7 @@ OutputAngle AngleInput(OutputAngle input_angle) {
 
   return output_angle;
 }
+*/
 
 void RunMotor(int speed, bool brake=true) {
   //Serial.print("Motor speed "); Serial.println(speed);
@@ -200,11 +200,13 @@ void setup() {
   delay(10000); // Wait 10 seconds to start serial output
   Serial.println("Starting Sketch");
   
+  /*
   // Encoder 
     Serial.println("Starting Encoder");
     pinMode(ENCODER_PIN_A, INPUT);
     pinMode(ENCODER_PIN_B, INPUT);
     encoder.begin();
+  */
 
   // Motor
     pinMode(MOTOR_PIN_A, OUTPUT);
@@ -215,6 +217,7 @@ void setup() {
   // Setup I2C Wire
   Wire.setSCL(D5);
   Wire.setSDA(D4);
+  Wire.setClock(400000);
   Wire.begin();
   // Current Sensor
     if (!INA.begin())  {
