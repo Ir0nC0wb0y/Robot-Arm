@@ -50,7 +50,7 @@
 // Loop
   // Display
   unsigned long loop_display_last = 0;
-  #define DISPLAY_WAIT_TIME  500 //Output angle and current, [us]
+  #define DISPLAY_WAIT_TIME  2500 //Output angle and current, [us]
   #define HEADER_COUNT 200
   int header_display = HEADER_COUNT;
   bool display_force = false;
