@@ -4,6 +4,7 @@
 #include <Wire.h>
 #include <INA219.h>
 #include <AS5600.h>
+#include <RP2040_PWM.h>
 
 
 // Encoder (Input)
@@ -25,6 +26,7 @@
   #define ENCODER_OFFSET 0.0
   AS5600L as5600;
   OutputAngle angle_output;
+  #define PRINT_ENCODER_INFO true
 
 // Motor
   #define MOTOR_PIN_A D9
@@ -39,6 +41,12 @@
   float current_mA = 0.0;
   //float shunt_mV = 0.0;
 
+// RP2040 PWM
+  float frequency = 20000.0; // Frequency, in Hz
+  float dutyCycle_A = 0.0;
+  float dutyCycle_B = 0.0;
+  RP2040_PWM* PWM_Instance[2];
+
 // Loop
   // Display
   unsigned long loop_display_last = 0;
@@ -49,11 +57,11 @@
   int motor_loop = 0;
 
   // Speed
-  int speed_start = 0;
-  int speed_end   = 0;
-  int speed_cur = 0;
-  double speed_calc_slope = 0.0;
-  #define SPEED_MAX 255
+  float speed_start = 0;
+  float speed_end   = 0;
+  float speed_cur = 0;
+  float speed_calc_slope = 0.0;
+  #define SPEED_MAX 100.0
   //int speed_temp = 0;
   //#define SPEED_CHANGE 5
   bool speed_dir = true;
@@ -112,6 +120,33 @@ OutputAngle AngleInput(OutputAngle input_angle) {
 }
 */
 
+void RunMotor_RP2040(float speed, bool brake=true) {
+  if (speed > MOTOR_OUTPUT_MIN) {
+    if (brake) {
+      PWM_Instance[0]->setPWM(MOTOR_PIN_A, frequency, 100.0);
+    } else {
+      PWM_Instance[0]->setPWM(MOTOR_PIN_A, frequency, 0.0);
+    }
+    PWM_Instance[1]->setPWM(MOTOR_PIN_B, frequency, SPEED_MAX-speed);
+  } else if (speed < -MOTOR_OUTPUT_MIN) {
+    if (brake) {
+      PWM_Instance[1]->setPWM(MOTOR_PIN_B, frequency, 100.0);
+    } else {
+      PWM_Instance[1]->setPWM(MOTOR_PIN_B, frequency, 0.0);
+    }
+    PWM_Instance[0]->setPWM(MOTOR_PIN_A, frequency, SPEED_MAX+speed);
+  } else {
+    if (brake) {
+      PWM_Instance[0]->setPWM(MOTOR_PIN_A, frequency, 100.0);
+      PWM_Instance[1]->setPWM(MOTOR_PIN_B, frequency, 100.0);
+    } else {
+      PWM_Instance[0]->setPWM(MOTOR_PIN_A, frequency, 0.0);
+      PWM_Instance[1]->setPWM(MOTOR_PIN_B, frequency, 0.0);
+    }
+  }
+}
+
+/*
 void RunMotor(int speed, bool brake=true) {
   //Serial.print("Motor speed "); Serial.println(speed);
   if (speed > MOTOR_OUTPUT_MIN) {
@@ -140,6 +175,7 @@ void RunMotor(int speed, bool brake=true) {
   
   return;
 }
+*/
 
 void DoMotor() {
   // interpolate speed from Start/End
@@ -151,17 +187,17 @@ void DoMotor() {
   } else {
     speed_double = ((float)(cur_time - loop_speed_start))*speed_calc_slope + (float)speed_start;
     //speed_cur = (cur_time - loop_speed_start)*((speed_end - speed_start)/(loop_speed_end - loop_speed_start)) + speed_start;
-    speed_cur = (int)speed_double;
+    speed_cur = speed_double;
   }
   
-  if (speed_cur > 255){
-    speed_cur = 255;
+  if (speed_cur > SPEED_MAX){
+    speed_cur = SPEED_MAX;
     //Serial.println("Speed out of bounds");
-  } else if (speed_cur < -255) {
-    speed_cur = -255;
+  } else if (speed_cur < -SPEED_MAX) {
+    speed_cur = -SPEED_MAX;
     //Serial.println("Speed out of bounds");
   }
-  RunMotor(speed_cur);
+  RunMotor_RP2040(speed_cur);
   //Serial.print(" complete. New speed (double, float): ");
   //  Serial.print(speed_double);
   //  Serial.print(", ");
@@ -169,7 +205,7 @@ void DoMotor() {
   //  Serial.println();
 }
 
-void MotorSetpoint(int speed, int duration) {
+void MotorSetpoint(float speed, int duration) {
   Serial.print("Received new setpoint, speed, duration: ");
     Serial.print(speed);
     Serial.print(", ");
@@ -179,9 +215,9 @@ void MotorSetpoint(int speed, int duration) {
   speed_end = speed;
   loop_speed_start = micros();
   loop_speed_end   = loop_speed_start + duration;
-  speed_calc_slope = (float)(speed_end - speed_start) / (float)(loop_speed_end - loop_speed_start);
+  speed_calc_slope = (speed_end - speed_start) / (float)(loop_speed_end - loop_speed_start);
   Serial.print("Calc'd Final Speed: ");
-    Serial.println(((float)(speed_end - speed_start)) * speed_calc_slope + (float)speed_start);
+    Serial.println(((speed_end - speed_start)) * speed_calc_slope + speed_start);
 }
 
 
@@ -209,10 +245,14 @@ void setup() {
   */
 
   // Motor
-    pinMode(MOTOR_PIN_A, OUTPUT);
-    pinMode(MOTOR_PIN_B, OUTPUT);
-    digitalWrite(MOTOR_PIN_A, LOW);
-    digitalWrite(MOTOR_PIN_B, LOW);
+    //pinMode(MOTOR_PIN_A, OUTPUT);
+    //pinMode(MOTOR_PIN_B, OUTPUT);
+    //digitalWrite(MOTOR_PIN_A, LOW);
+    //digitalWrite(MOTOR_PIN_B, LOW);
+  
+  // Setup RP2040 PWM
+    PWM_Instance[0] = new RP2040_PWM(MOTOR_PIN_A, frequency, dutyCycle_A);
+    PWM_Instance[1] = new RP2040_PWM(MOTOR_PIN_B, frequency, dutyCycle_B);
 
   // Setup I2C Wire
   Wire.setSCL(D5);
@@ -254,16 +294,19 @@ void setup() {
     } else {
       Serial.println("AS5600 Connected!");
       as5600.setOffset(ENCODER_OFFSET);
-      Serial.print("Status: "); Serial.println(as5600.readStatus());
-      Serial.print("AGC   : "); Serial.println(as5600.readAGC());
-      Serial.print("Mag   : "); Serial.println(as5600.readMagnitude());
-      Serial.println();
-      Serial.print("Mag Detect : "); Serial.println(as5600.readAGC());
-      Serial.print("Mag 2Strong: "); Serial.println(as5600.magnetTooStrong());
-      Serial.print("Mag 2Weak  : "); Serial.println(as5600.magnetTooWeak());
-      Serial.println();
-      Serial.print("ZPos: "); Serial.println(as5600.getZPosition());
-      Serial.print("MPos: "); Serial.println(as5600.getMPosition());
+      
+      if (PRINT_ENCODER_INFO) {  
+        Serial.print("Status: "); Serial.println(as5600.readStatus());
+        Serial.print("AGC   : "); Serial.println(as5600.readAGC());
+        Serial.print("Mag   : "); Serial.println(as5600.readMagnitude());
+        Serial.println();
+        Serial.print("Mag Detect : "); Serial.println(as5600.readAGC());
+        Serial.print("Mag 2Strong: "); Serial.println(as5600.magnetTooStrong());
+        Serial.print("Mag 2Weak  : "); Serial.println(as5600.magnetTooWeak());
+        Serial.println();
+        Serial.print("ZPos: "); Serial.println(as5600.getZPosition());
+        Serial.print("MPos: "); Serial.println(as5600.getMPosition());
+      }
       delay(3000);
     }
 
@@ -321,7 +364,7 @@ void loop() {
 
     Serial.print(micros());
       Serial.print("|");
-      Serial.print(speed_cur);
+      Serial.print(speed_cur, 3);
       Serial.print("|");
       Serial.print(current_mA,0);
       Serial.print("|");
