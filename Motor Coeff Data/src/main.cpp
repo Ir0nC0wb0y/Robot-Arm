@@ -15,12 +15,12 @@
     public:
       int raw = 0;
       double angle = 0.0;
-      //double output_speed = 0.0;
+      double output_speed = 0.0;
       //double output_angle_last = 0.0;
-      //unsigned long last_time = 0;
+      unsigned long angle_time = 0;
   };
-  OutputAngle angle_before;
-  OutputAngle angle_after;
+  //OutputAngle angle_before;
+  //OutputAngle angle_after;
 // Encoder (Output)
   #define ENCODER_PIN_DIR D0
   #define ENCODER_OFFSET 0.0
@@ -50,7 +50,7 @@
 // Loop
   // Display
   unsigned long loop_display_last = 0;
-  #define DISPLAY_WAIT_TIME  5000 //Output angle and current, [us]
+  #define DISPLAY_WAIT_TIME  500 //Output angle and current, [us]
   #define HEADER_COUNT 200
   int header_display = HEADER_COUNT;
   bool display_force = false;
@@ -71,26 +71,39 @@
   //#define SPEED_RUN_STEP    1000
   #define SPEED_RUN_GO     5000000
   #define SPEED_RUN_STOP   1000000
-  #define SPEED_TIME_MIN    100000
-  #define SPEED_TIME_MAX  10000000
+  #define SPEED_TIME_MIN   1000000
+  #define SPEED_TIME_MAX   1000000
   unsigned long loop_speed_next  = 0;
   unsigned long loop_speed_start = 0;
   unsigned long loop_speed_end   = 0;
   int freq_tries = 0;
   #define FREQ_TIMES 2
   
-OutputAngle AngleOutput(OutputAngle input_angle) {
+OutputAngle AngleOutput(OutputAngle input_angle, bool reset = false) {
   int32_t enc_position = as5600.getCumulativePosition();
+  unsigned long angle_time = micros();
 
   // Calculate Angle @ output
   double calc_output_angle = (double)enc_position / 4096.0; // [%rotation]
   calc_output_angle = 360.0 * calc_output_angle; // [deg]
   //double calc_output_angle = as5600.getCumulativePosition();
 
+  // Calculate Speed from angle
+  double angle_diff = 0;
+  double time_diff = 0;
+  double calc_speed = 0;
+  if (!reset) {
+    angle_diff = calc_output_angle - input_angle.angle;
+    time_diff = ((double)angle_time - (double)input_angle.angle_time)/1000000;
+    calc_speed = angle_diff / time_diff;
+  }
+
   // Set output class
   OutputAngle output_angle;
   output_angle.raw = enc_position;
   output_angle.angle = calc_output_angle;
+  output_angle.output_speed = calc_speed;
+  output_angle.angle_time = angle_time;
 
   return output_angle;
 }
@@ -238,19 +251,6 @@ void setup() {
   delay(10000); // Wait 10 seconds to start serial output
   Serial.println("Starting Sketch");
   
-  /*
-  // Encoder 
-    Serial.println("Starting Encoder");
-    pinMode(ENCODER_PIN_A, INPUT);
-    pinMode(ENCODER_PIN_B, INPUT);
-    encoder.begin();
-  */
-
-  // Motor
-    //pinMode(MOTOR_PIN_A, OUTPUT);
-    //pinMode(MOTOR_PIN_B, OUTPUT);
-    //digitalWrite(MOTOR_PIN_A, LOW);
-    //digitalWrite(MOTOR_PIN_B, LOW);
   
   // Setup RP2040 PWM
     PWM_Instance[0] = new RP2040_PWM(MOTOR_PIN_A, frequency, dutyCycle_A);
@@ -268,8 +268,10 @@ void setup() {
       INA.setMaxCurrentShunt(3,0.1);
       INA.setBusVoltageRange(16);
       INA.setGain(8);
-      INA.setBusResolution(10);
-      INA.setShuntResolution(10);
+      INA.setBusResolution(12);
+      INA.setShuntResolution(12);
+      INA.setShuntSamples(1);
+      INA.setBusSamples(1);
       INA.setModeShuntContinuous();
 
       Serial.print("CALI:\t");
@@ -308,6 +310,8 @@ void setup() {
         Serial.println();
         Serial.print("ZPos: "); Serial.println(as5600.getZPosition());
         Serial.print("MPos: "); Serial.println(as5600.getMPosition());
+
+        angle_output = AngleOutput(angle_output, true);
       }
       delay(3000);
     }
@@ -347,40 +351,37 @@ void loop() {
       
   if (micros() - loop_display_last >= DISPLAY_WAIT_TIME || display_force) {
     loop_display_last = micros();
-    loop_display_last = loop_display_last - loop_display_last%DISPLAY_WAIT_TIME;
-    //angle_before = AngleInput(angle_before);
+
     unsigned long perf_current = micros();
     CurrentSense();
     perf_current = micros() - perf_current;
-    //angle_after = AngleInput(angle_after);
-    unsigned long perf_output = micros();
-    angle_output = AngleOutput(angle_output);
-    perf_output = micros() - perf_output;
+    
+    //unsigned long perf_output = micros();
+    //angle_output = AngleOutput(angle_output);
+    //perf_output = micros() - perf_output;
 
+    unsigned long perf_display = micros();
     if (header_display >= HEADER_COUNT) {
-      Serial.println("Time [us]|PWM|Frequency|Current [mA]|Perf Current [us]|Angle [deg]|Perf Angle [us]");
+      Serial.println("Time [us]|PWM|Current [mA]|Perf Current [us]|Perf Display [us]");
       header_display = 0;
     } else {
       header_display++;
     }
 
-    Serial.print(micros());
+    Serial.print(loop_display_last);
       Serial.print("|");
       Serial.print(speed_cur, 3);
-      Serial.print("|");
-      Serial.print(frequency,0);
       Serial.print("|");
       Serial.print(current_mA,0);
       Serial.print("|");
       Serial.print(perf_current);
       Serial.print("|");
-      Serial.print(angle_output.angle);
-      Serial.print("|");
-      Serial.print(perf_output);
+      Serial.print(micros()-perf_display);
       Serial.println();
 
     display_force = false;
     motor_loop = 0;
+    loop_display_last = loop_display_last - loop_display_last%DISPLAY_WAIT_TIME;
   }
  
 }
