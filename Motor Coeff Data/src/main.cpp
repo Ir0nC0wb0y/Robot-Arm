@@ -29,8 +29,8 @@
   #define PRINT_ENCODER_INFO false
 
 // Motor
-  #define MOTOR_PIN_A D9
-  #define MOTOR_PIN_B D8
+  #define MOTOR_PIN_A D8
+  #define MOTOR_PIN_B D9
   #define MOTOR_OUTPUT_MIN 0
   #define ENCODER_CPR 48.0
   #define MOTOR_GEARING 264
@@ -40,6 +40,12 @@
   INA219 INA(INA219_ADDRESS);
   float current_mA = 0.0;
   //float shunt_mV = 0.0;
+
+  #define ACS712_PIN A1
+  int ACS712_raw = 0;
+  float ACS712_calc = 0.0;
+  #define ACS712_CONVERSION 0.006711409
+  #define ACS712_MIDPOINT 2048
 
 // RP2040 PWM
   float frequency = 25000.0; // Frequency, in Hz
@@ -70,9 +76,9 @@
   //#define SPEED_STEP           1
   //#define SPEED_RUN_STEP    1000
   #define SPEED_RUN_GO     5000000
-  #define SPEED_RUN_STOP   1000000
-  #define SPEED_TIME_MIN   1000000
-  #define SPEED_TIME_MAX   1000000
+  #define SPEED_RUN_STOP   5000000
+  #define SPEED_TIME_MIN   2500000
+  #define SPEED_TIME_MAX   2500000
   unsigned long loop_speed_next  = 0;
   unsigned long loop_speed_start = 0;
   unsigned long loop_speed_end   = 0;
@@ -241,6 +247,15 @@ void CurrentSense() {
   //shunt_mV = INA.getShuntVoltage_mV();
 }
 
+void Current_ACS712() {
+  int read[3];
+  read[0] = analogRead(ACS712_PIN);
+  read[1] = analogRead(ACS712_PIN);
+  read[2] = analogRead(ACS712_PIN);
+  ACS712_raw = (read[0] + read[1] + read[2]) / 3;
+  int adjusted_raw = ACS712_raw - ACS712_MIDPOINT;
+  ACS712_calc = (float)adjusted_raw * ACS712_CONVERSION;
+}
 
 void setup() {
   Serial.begin(115200);
@@ -248,8 +263,9 @@ void setup() {
       // will pause Zero, Leonardo, etc until serial console opens
   //    yield();
   //}
-  delay(10000); // Wait 10 seconds to start serial output
+  delay(5000); // Wait 5 seconds to start serial output
   Serial.println("Starting Sketch");
+  analogReadResolution(12);
   
   
   // Setup RP2040 PWM
@@ -352,17 +368,20 @@ void loop() {
   if (micros() - loop_display_last >= DISPLAY_WAIT_TIME || display_force) {
     loop_display_last = micros();
 
-    unsigned long perf_current = micros();
-    CurrentSense();
-    perf_current = micros() - perf_current;
+    //unsigned long perf_current = micros();
+    //CurrentSense();
+    //perf_current = micros() - perf_current;
+
+    unsigned long perf_ACS = micros();
+    Current_ACS712();
+    perf_ACS = micros() - perf_ACS;
     
     //unsigned long perf_output = micros();
     //angle_output = AngleOutput(angle_output);
     //perf_output = micros() - perf_output;
 
-    unsigned long perf_display = micros();
     if (header_display >= HEADER_COUNT) {
-      Serial.println("Time [us]|PWM|Current [mA]|Perf Current [us]|Perf Display [us]");
+      Serial.println("Time [us]|PWM|ACS712 Raw|Current ACS712 [A]|Perf ACS712 [us]");
       header_display = 0;
     } else {
       header_display++;
@@ -372,11 +391,11 @@ void loop() {
       Serial.print("|");
       Serial.print(speed_cur, 3);
       Serial.print("|");
-      Serial.print(current_mA,0);
+      Serial.print(ACS712_raw);
       Serial.print("|");
-      Serial.print(perf_current);
+      Serial.print(ACS712_calc);
       Serial.print("|");
-      Serial.print(micros()-perf_display);
+      Serial.print(perf_ACS);
       Serial.println();
 
     display_force = false;
