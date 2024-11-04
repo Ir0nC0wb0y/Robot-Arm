@@ -1,0 +1,7 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "SC0915")(type "KiCad")(uri "D:/Downloads/SC0915/SC0915.kicad_sym")(options "")(descr ""))
+  (lib (name "DRV8871DDAR")(type "KiCad")(uri "D:/Downloads/DRV8871DDAR/DRV8871DDAR.kicad_sym")(options "")(descr ""))
+  (lib (name "MCP3208-CI_SL")(type "KiCad")(uri "D:/Downloads/MCP3208-CI_SL/MCP3208-CI_SL.kicad_sym")(options "")(descr ""))
+  (lib (name "ACS712ELCTR-05B-T")(type "KiCad")(uri "D:/Downloads/ACS712ELCTR-05B-T/ACS712ELCTR-05B-T.kicad_sym")(options "")(descr ""))
+)

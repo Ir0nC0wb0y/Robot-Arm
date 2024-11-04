@@ -1,0 +1,5 @@
+(fp_lib_table
+  (version 7)
+  (lib (name "CLMD_Library")(type "KiCad")(uri "${KIPRJMOD}/CLMD_Library.pretty")(options "")(descr ""))
+  (lib (name "DRV8871DDAR (1)")(type "KiCad")(uri "D:/Downloads/DRV8871DDAR (1)")(options "")(descr ""))
+)
