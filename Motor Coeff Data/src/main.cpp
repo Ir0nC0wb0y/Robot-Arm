@@ -1,4 +1,4 @@
-#include <Arduino.h>
+  #include <Arduino.h>
 //#include <pio_encoder.h>
 //#include <ArduPID.h>
 #include <Wire.h>
@@ -8,8 +8,8 @@
 
 
 // Encoder (Input)
-  #define ENCODER_PIN_A D2
-  #define ENCODER_PIN_B D3
+  #define ENCODER_PIN_A D8
+  #define ENCODER_PIN_B D9
   //PioEncoder encoder(D2); // Encoder on Pins 1/2 (must be sequential)
   class OutputAngle {
     public:
@@ -22,30 +22,57 @@
   //OutputAngle angle_before;
   //OutputAngle angle_after;
 // Encoder (Output)
-  #define ENCODER_PIN_DIR D0
+  #define ENCODER_PIN_DIR D3
   #define ENCODER_OFFSET 0.0
   AS5600L as5600;
   OutputAngle angle_output;
   #define PRINT_ENCODER_INFO false
 
 // Motor
-  #define MOTOR_PIN_A D8
-  #define MOTOR_PIN_B D9
+  #define MOTOR_PIN_A D6
+  #define MOTOR_PIN_B D7
   #define MOTOR_OUTPUT_MIN 0
   #define ENCODER_CPR 48.0
   #define MOTOR_GEARING 264
 
 // Current Sensor
-  #define INA219_ADDRESS 0x45
-  INA219 INA(INA219_ADDRESS);
-  float current_mA = 0.0;
-  //float shunt_mV = 0.0;
+  ////INA219
+  //  #define INA219_ADDRESS 0x45
+  //  INA219 INA(INA219_ADDRESS);
+  //  float current_mA = 0.0;
+  //  //float shunt_mV = 0.0;
 
-  #define ACS712_PIN A1
-  int ACS712_raw = 0;
-  float ACS712_calc = 0.0;
-  #define ACS712_CONVERSION 0.006711409
-  #define ACS712_MIDPOINT 2048
+  // ACS712
+    #define ACS712_PIN A0
+    int ACS712_raw = 0;
+    float ACS712_calc = 0.0;
+    #define ACS712_CONVERSION 0.006663468
+    #define ACS712_MIDPOINT 2086
+    int ACS712_midpoint = ACS712_MIDPOINT;
+    #define ACS712_READINGS 10
+    #define ACS712_CALIBRATE_COUNT 10000
+
+  // BUS VOLTAGE
+    #define BUS_READINGS 4
+    #define PIN_BUS_VOLTAGE_A A1
+    #define PIN_BUS_VOLTAGE_B A2
+    #define RESISTOR_A_HIGH 68000
+    #define RESISTOR_A_LOW  19620
+    #define RESISTOR_B_HIGH 67200
+    #define RESISTOR_B_LOW  19470
+    #define BUS_ADC_CONVERSION 0.00082275
+    #define BUS_A_CONVERSION (RESISTOR_A_HIGH+RESISTOR_A_LOW)/RESISTOR_A_LOW
+    #define BUS_B_CONVERSION (RESISTOR_B_HIGH+RESISTOR_B_LOW)/RESISTOR_B_LOW
+    class MotorVoltage {
+      public:
+        int Bus_A_raw = 0;
+        int Bus_B_raw = 0;
+        float Bus_A_conv = 0.0;
+        float Bus_B_conv = 0.0;
+        float Bus_voltage = 0.0;
+        float Bus_offset = 0.0;
+    };
+    MotorVoltage motorVoltage;
 
 // RP2040 PWM
   float frequency = 25000.0; // Frequency, in Hz
@@ -241,20 +268,58 @@ void MotorSetpoint(float speed, int duration) {
     Serial.println(((speed_end - speed_start)) * speed_calc_slope + speed_start);
 }
 
-
+/*
 void CurrentSense() {
   current_mA = INA.getCurrent_mA();
   //shunt_mV = INA.getShuntVoltage_mV();
 }
+*/
+
+MotorVoltage Motor_Voltage() {
+  MotorVoltage conversion;
+  // Collect ADC data
+  for (int i = 0; i < BUS_READINGS; i++) {
+    conversion.Bus_A_raw += analogRead(PIN_BUS_VOLTAGE_A);
+    conversion.Bus_B_raw += analogRead(PIN_BUS_VOLTAGE_B);
+  }
+  conversion.Bus_A_raw = conversion.Bus_A_raw / BUS_READINGS;
+  conversion.Bus_B_raw = conversion.Bus_B_raw / BUS_READINGS;
+
+  // Calculate Input Voltage
+  conversion.Bus_A_conv = conversion.Bus_A_raw * BUS_ADC_CONVERSION * BUS_A_CONVERSION;
+  conversion.Bus_B_conv = conversion.Bus_B_raw * BUS_ADC_CONVERSION * BUS_B_CONVERSION;
+
+  // Calculate Voltage Difference
+  conversion.Bus_voltage = conversion.Bus_A_conv - conversion.Bus_B_conv;
+  if (conversion.Bus_A_conv > conversion.Bus_B_conv) {
+    conversion.Bus_offset = conversion.Bus_B_conv;
+  } else {
+    conversion.Bus_offset = conversion.Bus_A_conv;
+  }
+
+  return conversion;
+}
 
 void Current_ACS712() {
-  int read[3];
-  read[0] = analogRead(ACS712_PIN);
-  read[1] = analogRead(ACS712_PIN);
-  read[2] = analogRead(ACS712_PIN);
-  ACS712_raw = (read[0] + read[1] + read[2]) / 3;
-  int adjusted_raw = ACS712_raw - ACS712_MIDPOINT;
+  int read = 0;
+  for (int i=0;i<ACS712_READINGS;i++) {
+    read += analogRead(ACS712_PIN);
+  }
+  ACS712_raw = read / ACS712_READINGS;
+  int adjusted_raw = ACS712_raw - ACS712_midpoint;
   ACS712_calc = (float)adjusted_raw * ACS712_CONVERSION;
+
+}
+
+void ACS712_Calibrate_Midpoint() {
+  //unsigned long calibrate_finish = millis() + ACS712_CALIBRATE_TIME;
+  int reading_count = 0;
+  int read = 0;
+  while (reading_count <= ACS712_CALIBRATE_COUNT) {
+    reading_count++;
+    read += analogRead(ACS712_PIN);
+  }
+  ACS712_midpoint = read / reading_count;
 }
 
 void setup() {
@@ -265,18 +330,22 @@ void setup() {
   //}
   delay(5000); // Wait 5 seconds to start serial output
   Serial.println("Starting Sketch");
-  analogReadResolution(12);
-  
-  
+
   // Setup RP2040 PWM
     PWM_Instance[0] = new RP2040_PWM(MOTOR_PIN_A, frequency, dutyCycle_A);
     PWM_Instance[1] = new RP2040_PWM(MOTOR_PIN_B, frequency, dutyCycle_B);
+
+  // ACS712 Setup
+    analogReadResolution(12);
+    ACS712_Calibrate_Midpoint();
+    Serial.print("New ACS712 Midpoint: "); Serial.println(ACS712_midpoint);
 
   // Setup I2C Wire
   Wire.setSCL(D5);
   Wire.setSDA(D4);
   Wire.setClock(400000);
   Wire.begin();
+  /*
   // Current Sensor
     if (!INA.begin())  {
       Serial.println("INA219 could not connect. Fix and Reboot");
@@ -302,6 +371,7 @@ void setup() {
       Serial.println(INA.getShuntADC());
       
     }
+    */
 
   // Output Encoder
   as5600.setAddress(0x36);
@@ -375,13 +445,18 @@ void loop() {
     unsigned long perf_ACS = micros();
     Current_ACS712();
     perf_ACS = micros() - perf_ACS;
+
+    unsigned long perf_Bus = micros();
+    MotorVoltage mvoltage;
+    mvoltage = Motor_Voltage();
+    perf_Bus = micros() - perf_Bus;
     
     //unsigned long perf_output = micros();
     //angle_output = AngleOutput(angle_output);
     //perf_output = micros() - perf_output;
 
     if (header_display >= HEADER_COUNT) {
-      Serial.println("Time [us]|PWM|ACS712 Raw|Current ACS712 [A]|Perf ACS712 [us]");
+      Serial.println("Time [us]|PWM|ACS712 Raw|Current ACS712 [A]|Perf ACS712 [us]|Bus Raw A|Bus Raw B|Bus Voltage|Bus Offset|Perf Bus[us]");
       header_display = 0;
     } else {
       header_display++;
@@ -393,9 +468,19 @@ void loop() {
       Serial.print("|");
       Serial.print(ACS712_raw);
       Serial.print("|");
-      Serial.print(ACS712_calc);
+      Serial.print(ACS712_calc, 3);
       Serial.print("|");
       Serial.print(perf_ACS);
+      Serial.print("|");
+      Serial.print(mvoltage.Bus_A_conv);
+      Serial.print("|");
+      Serial.print(mvoltage.Bus_B_conv);
+      Serial.print("|");
+      Serial.print(mvoltage.Bus_voltage);
+      Serial.print("|");
+      Serial.print(mvoltage.Bus_offset);
+      Serial.print("|");
+      Serial.print(perf_Bus);
       Serial.println();
 
     display_force = false;
