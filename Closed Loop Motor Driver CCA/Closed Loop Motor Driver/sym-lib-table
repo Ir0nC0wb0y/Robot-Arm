@@ -4,4 +4,5 @@
   (lib (name "DRV8871DDAR")(type "KiCad")(uri "D:/Downloads/DRV8871DDAR/DRV8871DDAR.kicad_sym")(options "")(descr ""))
   (lib (name "MCP3208-CI_SL")(type "KiCad")(uri "D:/Downloads/MCP3208-CI_SL/MCP3208-CI_SL.kicad_sym")(options "")(descr ""))
   (lib (name "ACS712ELCTR-05B-T")(type "KiCad")(uri "D:/Downloads/ACS712ELCTR-05B-T/ACS712ELCTR-05B-T.kicad_sym")(options "")(descr ""))
+  (lib (name "LM1117IMPX-5.0_NOPB")(type "KiCad")(uri "D:/Downloads/LM1117IMPX-5.0_NOPB/LM1117IMPX-5.0_NOPB.kicad_sym")(options "")(descr ""))
 )
