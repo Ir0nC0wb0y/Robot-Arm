@@ -1,15 +1,16 @@
-  #include <Arduino.h>
+#include <Arduino.h>
 //#include <pio_encoder.h>
-//#include <ArduPID.h>
+#include <PIDLib.hpp>
 #include <Wire.h>
 #include <INA219.h>
 #include <AS5600.h>
 #include <RP2040_PWM.h>
 
+#include "motor_params.h"
 
 // Encoder (Input)
-  #define ENCODER_PIN_A D8
-  #define ENCODER_PIN_B D9
+  //#define ENCODER_PIN_A D8
+  //#define ENCODER_PIN_B D9
   //PioEncoder encoder(D2); // Encoder on Pins 1/2 (must be sequential)
   class OutputAngle {
     public:
@@ -19,9 +20,8 @@
       //double output_angle_last = 0.0;
       unsigned long angle_time = 0;
   };
-  //OutputAngle angle_before;
-  //OutputAngle angle_after;
-// Encoder (Output)
+
+// Encoder (AS5600)
   #define ENCODER_PIN_DIR D3
   #define ENCODER_OFFSET 0.0
   AS5600L as5600;
@@ -89,7 +89,7 @@
   bool display_force = false;
   int motor_loop = 0;
 
-  // Speed
+  // Run Speed
   float speed_start = 0;
   float speed_end   = 0;
   float speed_cur = 0;
@@ -109,8 +109,42 @@
   unsigned long loop_speed_next  = 0;
   unsigned long loop_speed_start = 0;
   unsigned long loop_speed_end   = 0;
-  int freq_tries = 0;
-  #define FREQ_TIMES 2
+  //int freq_tries = 0;
+  //#define FREQ_TIMES 2
+
+// PID Setup
+  #define PID_INTERVAL_TORQUE   500 //us
+  #define PID_INTERVAL_SPEED    PID_INTERVAL_TORQUE * 3
+  #define PID_INTERVAL_POSITION PID_INTERVAL_SPEED * 2
+  // Position
+    unsigned long PID_time_pos = 0;
+    PIDLib_MeasurementType Meas_position{};
+    PIDLib_PIDSetupType PIDSetup_position{};
+    PIDLib_PID PID_position{};
+    #define GAIN_POS_P 1.0
+    #define GAIN_POS_I 0.0
+    #define GAIN_POS_D 0.0
+    float PID_Out_pos = 0.0;
+
+  // Speed
+    unsigned long PID_time_speed = 0;
+    PIDLib_MeasurementType Meas_speed{};
+    PIDLib_PIDSetupType PIDSetup_speed{};
+    PIDLib_PID PID_speed{};
+    #define GAIN_SPEED_P 1.0
+    #define GAIN_SPEED_I 0.0
+    #define GAIN_SPEED_D 0.0
+    float PID_Out_speed = 0.0;
+
+  // Torque/Current
+    unsigned long PID_time_torque = 0;
+    PIDLib_MeasurementType Meas_torque{};
+    PIDLib_PIDSetupType PIDSetup_torque{};
+    PIDLib_PID PID_torque{};
+    #define GAIN_TORQUE_P 1.0
+    #define GAIN_TORQUE_I 0.0
+    #define GAIN_TORQUE_D 0.0
+    float PID_Out_torque = 0.0;
   
 OutputAngle AngleOutput(OutputAngle input_angle, bool reset = false) {
   int32_t enc_position = as5600.getCumulativePosition();
@@ -313,13 +347,68 @@ void Current_ACS712() {
 
 void ACS712_Calibrate_Midpoint() {
   //unsigned long calibrate_finish = millis() + ACS712_CALIBRATE_TIME;
-  int reading_count = 0;
-  int read = 0;
+  unsigned int reading_count = 0;
+  unsigned int read = 0;
   while (reading_count <= ACS712_CALIBRATE_COUNT) {
     reading_count++;
     read += analogRead(ACS712_PIN);
   }
-  ACS712_midpoint = read / reading_count;
+  ACS712_midpoint = (int) (read / reading_count);
+}
+
+void Display_Info() {
+  if (micros() - loop_display_last >= DISPLAY_WAIT_TIME || display_force) {
+    loop_display_last = micros();
+
+    //unsigned long perf_current = micros();
+    //CurrentSense();
+    //perf_current = micros() - perf_current;
+
+    unsigned long perf_ACS = micros();
+    Current_ACS712();
+    perf_ACS = micros() - perf_ACS;
+
+    unsigned long perf_Bus = micros();
+    MotorVoltage mvoltage;
+    mvoltage = Motor_Voltage();
+    perf_Bus = micros() - perf_Bus;
+    
+    //unsigned long perf_output = micros();
+    //angle_output = AngleOutput(angle_output);
+    //perf_output = micros() - perf_output;
+
+    if (header_display >= HEADER_COUNT) {
+      Serial.println("Time [us]|PWM|ACS712 Raw|Current ACS712 [A]|Perf ACS712 [us]|Bus Raw A|Bus Raw B|Bus Voltage|Bus Offset|Perf Bus[us]");
+      header_display = 0;
+    } else {
+      header_display++;
+    }
+
+    Serial.print(loop_display_last);
+      Serial.print("|");
+      Serial.print(speed_cur, 3);
+      Serial.print("|");
+      Serial.print(ACS712_raw);
+      Serial.print("|");
+      Serial.print(ACS712_calc, 3);
+      Serial.print("|");
+      Serial.print(perf_ACS);
+      Serial.print("|");
+      Serial.print(mvoltage.Bus_A_conv);
+      Serial.print("|");
+      Serial.print(mvoltage.Bus_B_conv);
+      Serial.print("|");
+      Serial.print(mvoltage.Bus_voltage);
+      Serial.print("|");
+      Serial.print(mvoltage.Bus_offset);
+      Serial.print("|");
+      Serial.print(perf_Bus);
+      Serial.println();
+
+    display_force = false;
+    motor_loop = 0;
+    loop_display_last = loop_display_last - loop_display_last%DISPLAY_WAIT_TIME;
+  }
 }
 
 void setup() {
@@ -404,6 +493,27 @@ void setup() {
 
   display_force = true;
 
+  // PID Setup
+    // Position
+      PIDSetup_position.gainP = GAIN_POS_P;
+      PIDSetup_position.gainI = GAIN_POS_I;
+      PIDSetup_position.gainD = GAIN_POS_D;
+      PIDSetup_position.outputLowerLimit = -MOTOR_PARAM_MAX_SPEED;
+      PIDSetup_position.outputUpperLimit =  MOTOR_PARAM_MAX_SPEED;
+    
+    // Speed
+      PIDSetup_speed.gainP = GAIN_SPEED_P;
+      PIDSetup_speed.gainI = GAIN_SPEED_I;
+      PIDSetup_speed.gainD = GAIN_SPEED_D;
+      PIDSetup_speed.outputLowerLimit =  -MOTOR_PARAM_STALL_TORQUE;
+      PIDSetup_speed.outputUpperLimit =   MOTOR_PARAM_STALL_TORQUE;
+
+    // Torque
+      PIDSetup_torque.gainP = GAIN_TORQUE_P;
+      PIDSetup_torque.gainI = GAIN_TORQUE_I;
+      PIDSetup_torque.gainD = GAIN_TORQUE_D;
+      PIDSetup_torque.outputLowerLimit = -100.0; // Inverse PWM
+      PIDSetup_torque.outputUpperLimit =  100.0; // Max PWM
 }
 
 void loop() {
@@ -431,61 +541,52 @@ void loop() {
     }
   }
 
-  DoMotor();
-  motor_loop++;
+  // Check Position PID Time
+  if (micros() - PID_time_pos >= PID_INTERVAL_POSITION) {
+    // CHANGE THIS SET POINT ALGORITHM
+    float position_setpoint = random(-360, 360);
 
-      
-  if (micros() - loop_display_last >= DISPLAY_WAIT_TIME || display_force) {
-    loop_display_last = micros();
+    PID_time_pos = micros();
+    // Collect measurement
+    angle_output = AngleOutput(angle_output);
+    Meas_position.time_usec = angle_output.angle_time;
+    Meas_position.value = angle_output.angle;
 
-    //unsigned long perf_current = micros();
-    //CurrentSense();
-    //perf_current = micros() - perf_current;
+    // compute speed setpoint
+    PID_Out_pos = PID_position.run(position_setpoint,Meas_position);
 
-    unsigned long perf_ACS = micros();
-    Current_ACS712();
-    perf_ACS = micros() - perf_ACS;
-
-    unsigned long perf_Bus = micros();
-    MotorVoltage mvoltage;
-    mvoltage = Motor_Voltage();
-    perf_Bus = micros() - perf_Bus;
-    
-    //unsigned long perf_output = micros();
-    //angle_output = AngleOutput(angle_output);
-    //perf_output = micros() - perf_output;
-
-    if (header_display >= HEADER_COUNT) {
-      Serial.println("Time [us]|PWM|ACS712 Raw|Current ACS712 [A]|Perf ACS712 [us]|Bus Raw A|Bus Raw B|Bus Voltage|Bus Offset|Perf Bus[us]");
-      header_display = 0;
-    } else {
-      header_display++;
-    }
-
-    Serial.print(loop_display_last);
-      Serial.print("|");
-      Serial.print(speed_cur, 3);
-      Serial.print("|");
-      Serial.print(ACS712_raw);
-      Serial.print("|");
-      Serial.print(ACS712_calc, 3);
-      Serial.print("|");
-      Serial.print(perf_ACS);
-      Serial.print("|");
-      Serial.print(mvoltage.Bus_A_conv);
-      Serial.print("|");
-      Serial.print(mvoltage.Bus_B_conv);
-      Serial.print("|");
-      Serial.print(mvoltage.Bus_voltage);
-      Serial.print("|");
-      Serial.print(mvoltage.Bus_offset);
-      Serial.print("|");
-      Serial.print(perf_Bus);
-      Serial.println();
-
-    display_force = false;
-    motor_loop = 0;
-    loop_display_last = loop_display_last - loop_display_last%DISPLAY_WAIT_TIME;
   }
- 
+
+  // Check Speed PID Time
+  if (micros() - PID_time_speed >= PID_INTERVAL_SPEED) {
+    // check measurement time (s/b w/in the speed interval)
+    if (micros() - angle_output.angle_time > PID_INTERVAL_SPEED / 2) {
+      angle_output = AngleOutput(angle_output);
+    }
+    Meas_speed.time_usec = angle_output.angle_time;
+    Meas_speed.value = angle_output.output_speed;
+
+    // compute torque setpoint
+    PID_Out_speed = PID_position.run(PID_Out_pos,Meas_speed);
+  }
+  
+  // Check Torque PID Time
+  if (micros() - PID_time_torque >= PID_INTERVAL_TORQUE) {
+    // collect measurement
+    Current_ACS712();
+    Meas_torque.time_usec = micros();
+    Meas_torque.value = ACS712_calc;
+
+    // compute PWM setpoint
+    PID_Out_torque = PID_position.run(PID_Out_speed,Meas_torque);
+
+    // Run Motor
+    RunMotor_RP2040(PID_Out_torque);
+    
+  }
+
+  //DoMotor();
+  //motor_loop++;
+
+  //Display_Info(); // Check this does what you are trying to do before re-enabling
 }
