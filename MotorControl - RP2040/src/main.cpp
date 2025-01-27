@@ -1,13 +1,15 @@
 #include <Arduino.h>
 #include <pio_encoder.h>
 #include <Wire.h>
-#include <Adafruit_INA219.h>
 #include <PIDLib.hpp>
+#include <AS5600.h>
+#include <RP2040_PWM.h>
 
+#include "motor_params.h"
 
 // Encoder
-  #define ENCODER_PIN_A D2
-  #define ENCODER_PIN_B D3
+  #define ENCODER_PIN_A D8
+  #define ENCODER_PIN_B D9
   PioEncoder encoder(D2); // Encoder on Pins 1/2 (must be sequential)
   // Encoder Angle
     int enc_position = 0;
@@ -18,20 +20,66 @@
     #define POS_SETPOINT_CHANGE 30.0
     #define POS_SETPOINT_MULT    6
 
+// AS5600
+  class OutputAngle {
+    public:
+      int raw = 0;
+      double angle = 0.0;
+      double output_speed = 0.0;
+      //double output_angle_last = 0.0;
+      unsigned long angle_time = 0;
+  };
+  #define ENCODER_PIN_DIR D3
+  #define ENCODER_OFFSET 0.0
+  AS5600L as5600;
+  OutputAngle angle_output;
+  #define PRINT_ENCODER_INFO false
+
 // Motor
-  #define MOTOR_PIN_A D9
-  #define MOTOR_PIN_B D8
+  #define MOTOR_PIN_A D6
+  #define MOTOR_PIN_B D7
   #define MOTOR_OUTPUT_MIN 0
   #define ENCODER_CPR 48.0
-  #define MOTOR_GEARING 9.6
+  #define MOTOR_GEARING 264
+
+// RP2040 PWM
+  float frequency = 25000.0; // Frequency, in Hz
+  float dutyCycle_A = 0.0;
+  float dutyCycle_B = 0.0;
+  RP2040_PWM* PWM_Instance[2];
 
 // Current Sensor
-  Adafruit_INA219 ina219;
-  //float shuntvoltage = 0;
-  //float busvoltage = 0;
-  float current_mA = 0;
-  //float loadvoltage = 0;
-  //float power_mW = 0;
+  // ACS712
+    #define ACS712_PIN A0
+    int ACS712_raw = 0;
+    float ACS712_calc = 0.0;
+    #define ACS712_CONVERSION 0.006663468
+    #define ACS712_MIDPOINT 2086
+    int ACS712_midpoint = ACS712_MIDPOINT;
+    #define ACS712_READINGS 10
+    #define ACS712_CALIBRATE_COUNT 10000
+
+  // BUS VOLTAGE
+    #define BUS_READINGS 4
+    #define PIN_BUS_VOLTAGE_A A1
+    #define PIN_BUS_VOLTAGE_B A2
+    #define RESISTOR_A_HIGH 68000
+    #define RESISTOR_A_LOW  19620
+    #define RESISTOR_B_HIGH 67200
+    #define RESISTOR_B_LOW  19470
+    #define BUS_ADC_CONVERSION 0.00082275
+    #define BUS_A_CONVERSION (RESISTOR_A_HIGH+RESISTOR_A_LOW)/RESISTOR_A_LOW
+    #define BUS_B_CONVERSION (RESISTOR_B_HIGH+RESISTOR_B_LOW)/RESISTOR_B_LOW
+    class MotorVoltage {
+      public:
+        int Bus_A_raw = 0;
+        int Bus_B_raw = 0;
+        float Bus_A_conv = 0.0;
+        float Bus_B_conv = 0.0;
+        float Bus_voltage = 0.0;
+        float Bus_offset = 0.0;
+    };
+    MotorVoltage motorVoltage;
 
 
 // Loop
@@ -86,8 +134,8 @@
     unsigned long time_position_past[LOOP_HIST_CNT] = {};
     int time_position_past_idx = 0;
 
-int Loop_Freq_calc(unsigned long time_list[LOOP_HIST_CNT]) {
-  int freq_calc = 0;
+double Loop_Freq_calc(unsigned long time_list[LOOP_HIST_CNT]) {
+  double freq_calc = 0.0;
   unsigned long time_sum = 0;
 
   // loop through values
@@ -100,10 +148,39 @@ int Loop_Freq_calc(unsigned long time_list[LOOP_HIST_CNT]) {
   }
 
   // Divide by # valid values
-  freq_calc = time_sum / num_valid_values; // summed us divided by count -> us
-  freq_calc = 1000000 / freq_calc; // s/s-> Hz
+  freq_calc = (double)time_sum / (double)num_valid_values; // summed us divided by count -> us
+  freq_calc = 1000000.0 / freq_calc; // s/s-> Hz
 
   return freq_calc;
+}
+
+OutputAngle AngleOutput(OutputAngle input_angle, bool reset = false) {
+  int32_t enc_position = as5600.getCumulativePosition();
+  unsigned long angle_time = micros();
+
+  // Calculate Angle @ output
+  double calc_output_angle = (double)enc_position / 4096.0; // [%rotation]
+  calc_output_angle = 360.0 * calc_output_angle; // [deg]
+  //double calc_output_angle = as5600.getCumulativePosition();
+
+  // Calculate Speed from angle
+  double angle_diff = 0;
+  double time_diff = 0;
+  double calc_speed = 0;
+  if (!reset) {
+    angle_diff = calc_output_angle - input_angle.angle;
+    time_diff = ((double)angle_time - (double)input_angle.angle_time)/1000000;
+    calc_speed = angle_diff / time_diff;
+  }
+
+  // Set output class
+  OutputAngle output_angle;
+  output_angle.raw = enc_position;
+  output_angle.angle = calc_output_angle;
+  output_angle.output_speed = calc_speed;
+  output_angle.angle_time = angle_time;
+
+  return output_angle;
 }
 
 void AngleCalcs() {
@@ -131,33 +208,83 @@ void AngleCalcs() {
     meas_position.value = output_angle;
 }
 
-void RunMotor(int speed) {
-  //Serial.print("Motor speed "); Serial.println(speed);
+void RunMotor_RP2040(float speed, bool brake=true) {
   if (speed > MOTOR_OUTPUT_MIN) {
-    digitalWrite(MOTOR_PIN_A, HIGH); 
-    analogWrite(MOTOR_PIN_B, 255-speed);
-  } else if (speed < MOTOR_OUTPUT_MIN) {
-    analogWrite(MOTOR_PIN_A, 255+speed);
-    digitalWrite(MOTOR_PIN_B, HIGH); 
+    if (brake) {
+      PWM_Instance[0]->setPWM(MOTOR_PIN_A, frequency, 100.0);
+    } else {
+      PWM_Instance[0]->setPWM(MOTOR_PIN_A, frequency, 0.0);
+    }
+    PWM_Instance[1]->setPWM(MOTOR_PIN_B, frequency, 100.0-speed);
+  } else if (speed < -MOTOR_OUTPUT_MIN) {
+    if (brake) {
+      PWM_Instance[1]->setPWM(MOTOR_PIN_B, frequency, 100.0);
+    } else {
+      PWM_Instance[1]->setPWM(MOTOR_PIN_B, frequency, 0.0);
+    }
+    PWM_Instance[0]->setPWM(MOTOR_PIN_A, frequency, 100.0+speed);
   } else {
-    digitalWrite(MOTOR_PIN_A, LOW);
-    digitalWrite(MOTOR_PIN_B, LOW);
+    if (brake) {
+      PWM_Instance[0]->setPWM(MOTOR_PIN_A, frequency, 100.0);
+      PWM_Instance[1]->setPWM(MOTOR_PIN_B, frequency, 100.0);
+    } else {
+      PWM_Instance[0]->setPWM(MOTOR_PIN_A, frequency, 0.0);
+      PWM_Instance[1]->setPWM(MOTOR_PIN_B, frequency, 0.0);
+    }
   }
-  
-  return;
 }
 
-void CurrentSense() {
-  //shuntvoltage = ina219.getShuntVoltage_mV();
-  //busvoltage = ina219.getBusVoltage_V();
-  current_mA = ina219.getCurrent_mA();
-  //power_mW = ina219.getPower_mW();
-  //loadvoltage = busvoltage + (shuntvoltage / 1000);
+/*
+MotorVoltage Motor_Voltage() {
+  MotorVoltage conversion;
+  // Collect ADC data
+  for (int i = 0; i < BUS_READINGS; i++) {
+    conversion.Bus_A_raw += analogRead(PIN_BUS_VOLTAGE_A);
+    conversion.Bus_B_raw += analogRead(PIN_BUS_VOLTAGE_B);
+  }
+  conversion.Bus_A_raw = conversion.Bus_A_raw / BUS_READINGS;
+  conversion.Bus_B_raw = conversion.Bus_B_raw / BUS_READINGS;
 
+  // Calculate Input Voltage
+  conversion.Bus_A_conv = conversion.Bus_A_raw * BUS_ADC_CONVERSION * BUS_A_CONVERSION;
+  conversion.Bus_B_conv = conversion.Bus_B_raw * BUS_ADC_CONVERSION * BUS_B_CONVERSION;
+
+  // Calculate Voltage Difference
+  conversion.Bus_voltage = conversion.Bus_A_conv - conversion.Bus_B_conv;
+  if (conversion.Bus_A_conv > conversion.Bus_B_conv) {
+    conversion.Bus_offset = conversion.Bus_B_conv;
+  } else {
+    conversion.Bus_offset = conversion.Bus_A_conv;
+  }
+
+  return conversion;
+}
+*/
+
+void Current_ACS712() {
+  int read = 0;
+  for (int i=0;i<ACS712_READINGS;i++) {
+    read += analogRead(ACS712_PIN);
+  }
   meas_current.time_usec = micros();
-  meas_current.value = current_mA;
+  ACS712_raw = read / ACS712_READINGS;
+  int adjusted_raw = ACS712_raw - ACS712_midpoint;
+  ACS712_calc = (float)adjusted_raw * ACS712_CONVERSION;
+
+  
+  meas_speed.value = ACS712_calc;
 }
 
+void ACS712_Calibrate_Midpoint() {
+  //unsigned long calibrate_finish = millis() + ACS712_CALIBRATE_TIME;
+  unsigned int reading_count = 0;
+  unsigned int read = 0;
+  while (reading_count <= ACS712_CALIBRATE_COUNT) {
+    reading_count++;
+    read += analogRead(ACS712_PIN);
+  }
+  ACS712_midpoint = (int) (read / reading_count);
+}
 
 void setup() {
   Serial.begin(115200);
@@ -165,7 +292,17 @@ void setup() {
       // will pause Zero, Leonardo, etc until serial console opens
       yield();
   }
+  delay(3000);
   Serial.println("Starting Sketch");
+
+  // Setup RP2040 PWM
+    PWM_Instance[0] = new RP2040_PWM(MOTOR_PIN_A, frequency, dutyCycle_A);
+    PWM_Instance[1] = new RP2040_PWM(MOTOR_PIN_B, frequency, dutyCycle_B);
+
+  // ACS712 Setup
+    analogReadResolution(12);
+    ACS712_Calibrate_Midpoint();
+    Serial.print("New ACS712 Midpoint: "); Serial.println(ACS712_midpoint);
   
   // Encoder 
     Serial.println("Starting Encoder");
@@ -179,11 +316,42 @@ void setup() {
     digitalWrite(MOTOR_PIN_A, LOW);
     digitalWrite(MOTOR_PIN_B, LOW);
 
-  // Current Sensor
-    if (! ina219.begin()) {
-      Serial.println("Failed to find INA219 chip");
-      while (1) { delay(10); }
-    }
+  // Setup I2C Wire
+    Wire.setSCL(D5);
+    Wire.setSDA(D4);
+    Wire.setClock(400000);
+    Wire.begin();
+
+  /*
+  // Output Encoder
+    as5600.setAddress(0x36);
+    as5600.setDirection(AS5600_CLOCK_WISE);
+      Serial.print("Connected to encoder at address "); Serial.println(as5600.getAddress());
+      as5600.begin(ENCODER_PIN_DIR);
+      if (!as5600.isConnected()) {
+        Serial.println("AS5600 is not connected");
+        while (1) {delay(10);}
+      } else {
+        Serial.println("AS5600 Connected!");
+        as5600.setOffset(ENCODER_OFFSET);
+        
+        if (PRINT_ENCODER_INFO) {  
+          Serial.print("Status: "); Serial.println(as5600.readStatus());
+          Serial.print("AGC   : "); Serial.println(as5600.readAGC());
+          Serial.print("Mag   : "); Serial.println(as5600.readMagnitude());
+          Serial.println();
+          Serial.print("Mag Detect : "); Serial.println(as5600.readAGC());
+          Serial.print("Mag 2Strong: "); Serial.println(as5600.magnetTooStrong());
+          Serial.print("Mag 2Weak  : "); Serial.println(as5600.magnetTooWeak());
+          Serial.println();
+          Serial.print("ZPos: "); Serial.println(as5600.getZPosition());
+          Serial.print("MPos: "); Serial.println(as5600.getMPosition());
+
+          angle_output = AngleOutput(angle_output, true);
+        }
+        delay(3000);
+      }
+  */
 
   // Setup PID
     // PID Setup: current
@@ -270,11 +438,13 @@ void loop() {
     }
   }
 
+
   if (run_current) {
-    CurrentSense();
+    Current_ACS712();
     PIDout_current  = PID_current.run(meas_current);
-    RunMotor(PIDout_current);
+    RunMotor_RP2040(PIDout_current);
   }
+
   
 
       

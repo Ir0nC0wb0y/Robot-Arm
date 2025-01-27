@@ -1,0 +1,4 @@
+
+#define MOTOR_PARAM_MAX_SPEED      20.0 //RPM
+#define MOTOR_PARAM_STALL_CURRENT   1.3 //A
+#define MOTOR_PARAM_STALL_TORQUE   20.0 //kg-cm
