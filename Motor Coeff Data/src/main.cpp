@@ -518,6 +518,7 @@ void setup() {
 
 void loop() {
 
+  /*
   if (micros() >= loop_speed_next ) {
     //Serial.println("Calculating new Setpoint");
     if (speed_go) {
@@ -540,11 +541,13 @@ void loop() {
       speed_go = true;
     }
   }
+  */
 
   // Check Position PID Time
   if (micros() - PID_time_pos >= PID_INTERVAL_POSITION) {
     // CHANGE THIS SET POINT ALGORITHM
     float position_setpoint = random(-360, 360);
+    PID_position.setpoint(position_setpoint);
 
     PID_time_pos = micros();
     // Collect measurement
@@ -553,7 +556,8 @@ void loop() {
     Meas_position.value = angle_output.angle;
 
     // compute speed setpoint
-    PID_Out_pos = PID_position.run(position_setpoint,Meas_position);
+    PID_Out_pos = PID_position.run(Meas_position);
+    PID_speed.setpoint(PID_Out_pos);
 
   }
 
@@ -567,7 +571,8 @@ void loop() {
     Meas_speed.value = angle_output.output_speed;
 
     // compute torque setpoint
-    PID_Out_speed = PID_position.run(PID_Out_pos,Meas_speed);
+    PID_Out_speed = PID_position.run(Meas_speed);
+    PID_torque.setpoint(PID_Out_speed);
   }
   
   // Check Torque PID Time
@@ -578,7 +583,7 @@ void loop() {
     Meas_torque.value = ACS712_calc;
 
     // compute PWM setpoint
-    PID_Out_torque = PID_position.run(PID_Out_speed,Meas_torque);
+    PID_Out_torque = PID_position.run(Meas_torque);
 
     // Run Motor
     RunMotor_RP2040(PID_Out_torque);
