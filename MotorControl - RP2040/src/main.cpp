@@ -215,7 +215,7 @@ void loop() {
     time_position_last = micros();
   }
 
-  if (run_speed | run_position) {
+  if (run_speed || run_position) {
     AngleCalcs();
     if (run_position) {
       PIDout_position = PID_position.run(meas_position);
