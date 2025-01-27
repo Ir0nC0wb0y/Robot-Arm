@@ -9,6 +9,14 @@
   #define ENCODER_PIN_A D2
   #define ENCODER_PIN_B D3
   PioEncoder encoder(D2); // Encoder on Pins 1/2 (must be sequential)
+  // Encoder Angle
+    int enc_position = 0;
+    double output_angle = 0.0;
+    double output_speed = 0;
+    double output_angle_last = 0;
+    unsigned long enc_last_time = 0;
+    #define POS_SETPOINT_CHANGE 30.0
+    #define POS_SETPOINT_MULT    6
 
 // Motor
   #define MOTOR_PIN_A D9
@@ -33,16 +41,6 @@
   double PID_Pos_Setpoint = 0.0;
   #define POSITION_CHANGE 180
 
-
-  // Encoder Angle
-    int enc_position = 0;
-    double output_angle = 0.0;
-    double output_speed = 0;
-    double output_angle_last = 0;
-    unsigned long enc_last_time = 0;
-    #define POS_SETPOINT_CHANGE 30.0
-    #define POS_SETPOINT_MULT    6
-
   // Display
     unsigned long loop_display_last = 0;
     #define DISPLAY_WAIT_TIME 50
@@ -51,22 +49,6 @@
 
 
 // PID
-  /* Old PID library
-  bool PID_latch = false;
-  #define PID_LATCH_POINT 45.0
-  #define SAMPLE_PERIOD 500 //micros
-  unsigned long PID_sample_last = 0;
-  // Position
-    double PID_Pos_Input = 0;
-    double PID_Pos_Output = 0;
-    double PID_Pos_Setpoint = 0;
-    double Pos_Kp = 1.5; // 1.5
-    double Pos_Ki = 0.20; // 0.3
-    double Pos_Kd = 0.1; // 0.1
-    ArduPID PID_Pos;
-    #define POS_WINDUP_LIMITS  64
-    #define POS_OUTPUT_LIMITS 255
-    */
   // Inner loop (current)
     PIDLib::MeasurementType meas_current{};
     PIDLib::SetupType       setup_current{};
@@ -74,6 +56,8 @@
     #define CURRENT_LIMIT_LOWER   -1.0
     #define CURRENT_LIMIT_UPPER    1.0
     double PIDout_current = 0.0;
+    #define TIME_CURRENT 833
+    unsigned long time_current_last = 0;
     
   // Middle loop (speed)
     PIDLib::MeasurementType meas_speed{};
@@ -82,6 +66,8 @@
     #define SPEED_LIMIT_LOWER   -1.0
     #define SPEED_LIMIT_UPPER    1.0
     double PIDout_speed = 0.0;
+    #define TIME_SPEED 2500
+    unsigned long time_speed_last = 0;
 
   // Outer loop (position)
     PIDLib::MeasurementType meas_position{};
@@ -90,6 +76,8 @@
     #define POSITION_LIMIT_LOWER   -1.0
     #define POSITION_LIMIT_UPPER    1.0
     double PIDout_position = 0.0;
+    #define TIME_POSITION 5000
+    unsigned long time_position_last = 0;
 
 void AngleCalcs() {
     // Get encoder position
@@ -206,16 +194,46 @@ void setup() {
 
 void loop() {
 
-  AngleCalcs();
-  PIDout_position = PID_position.run(meas_position);
-  PID_speed.setpoint(PIDout_position);
+  bool run_current  = false;
+  bool run_speed    = false;
+  bool run_position = false;
 
-  PIDout_speed    = PID_speed.run(meas_speed);
-  PID_current.setpoint(PIDout_speed);
+  unsigned long time_loop_run = micros();
 
-  CurrentSense();
-  PIDout_current  = PID_current.run(meas_current);
-  RunMotor(PIDout_current);
+  if (micros() - time_current_last >= TIME_CURRENT) {
+    run_current = true;
+    time_current_last = micros();
+  }
+
+  if (micros() - time_speed_last >= TIME_SPEED) {
+    run_speed = true;
+    time_speed_last = micros();
+  }
+
+  if (micros() - time_position_last >= TIME_POSITION) {
+    run_position = true;
+    time_position_last = micros();
+  }
+
+  if (run_speed | run_position) {
+    AngleCalcs();
+    if (run_position) {
+      PIDout_position = PID_position.run(meas_position);
+      PID_speed.setpoint(PIDout_position);
+    }
+
+    if (run_speed) {
+      PIDout_speed    = PID_speed.run(meas_speed);
+      PID_current.setpoint(PIDout_speed);
+    }
+  }
+
+  if (run_current) {
+    CurrentSense();
+    PIDout_current  = PID_current.run(meas_current);
+    RunMotor(PIDout_current);
+  }
+  
 
       
   if (millis() - loop_display_last >= DISPLAY_WAIT_TIME) {
