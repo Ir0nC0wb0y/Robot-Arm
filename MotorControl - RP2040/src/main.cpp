@@ -53,8 +53,8 @@
     PIDLib::MeasurementType meas_current{};
     PIDLib::SetupType       setup_current{};
     PIDLib::PID             PID_current{};
-    #define CURRENT_LIMIT_LOWER   -1.0
-    #define CURRENT_LIMIT_UPPER    1.0
+    #define CURRENT_LIMIT_LOWER   -360.0
+    #define CURRENT_LIMIT_UPPER    360.0
     double PIDout_current = 0.0;
     #define TIME_CURRENT 833
     unsigned long time_current_last = 0;
@@ -63,8 +63,8 @@
     PIDLib::MeasurementType meas_speed{};
     PIDLib::SetupType       setup_speed{};
     PIDLib::PID             PID_speed{};
-    #define SPEED_LIMIT_LOWER   -1.0
-    #define SPEED_LIMIT_UPPER    1.0
+    #define SPEED_LIMIT_LOWER   -12.0
+    #define SPEED_LIMIT_UPPER    12.0
     double PIDout_speed = 0.0;
     #define TIME_SPEED 2500
     unsigned long time_speed_last = 0;
