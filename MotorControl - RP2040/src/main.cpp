@@ -138,6 +138,9 @@ void CurrentSense() {
   current_mA = ina219.getCurrent_mA();
   //power_mW = ina219.getPower_mW();
   //loadvoltage = busvoltage + (shuntvoltage / 1000);
+
+  meas_current.time_usec = micros();
+  meas_current.value = current_mA;
 }
 
 
@@ -205,10 +208,14 @@ void loop() {
 
   AngleCalcs();
   PIDout_position = PID_position.run(meas_position);
-  PIDout_speed    = PID_speed.run(meas_speed);
-  PIDout_current  = PID_current.run(meas_current);
+  PID_speed.setpoint(PIDout_position);
 
-  // do something with output_current
+  PIDout_speed    = PID_speed.run(meas_speed);
+  PID_current.setpoint(PIDout_speed);
+
+  CurrentSense();
+  PIDout_current  = PID_current.run(meas_current);
+  RunMotor(PIDout_current);
 
       
   if (millis() - loop_display_last >= DISPLAY_WAIT_TIME) {
