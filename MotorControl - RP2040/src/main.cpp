@@ -49,6 +49,7 @@
 
 
 // PID
+  #define LOOP_HIST_CNT 20
   // Inner loop (current)
     PIDLib::MeasurementType meas_current{};
     PIDLib::SetupType       setup_current{};
@@ -58,6 +59,8 @@
     double PIDout_current = 0.0;
     #define TIME_CURRENT 833
     unsigned long time_current_last = 0;
+    unsigned long time_current_past[LOOP_HIST_CNT] = {};
+    int time_current_past_idx = 0;
     
   // Middle loop (speed)
     PIDLib::MeasurementType meas_speed{};
@@ -68,6 +71,8 @@
     double PIDout_speed = 0.0;
     #define TIME_SPEED 2500
     unsigned long time_speed_last = 0;
+    unsigned long time_speed_past[LOOP_HIST_CNT] = {};
+    int time_speed_past_idx = 0;
 
   // Outer loop (position)
     PIDLib::MeasurementType meas_position{};
@@ -78,6 +83,28 @@
     double PIDout_position = 0.0;
     #define TIME_POSITION 5000
     unsigned long time_position_last = 0;
+    unsigned long time_position_past[LOOP_HIST_CNT] = {};
+    int time_position_past_idx = 0;
+
+int Loop_Freq_calc(unsigned long time_list[LOOP_HIST_CNT]) {
+  int freq_calc = 0;
+  unsigned long time_sum = 0;
+
+  // loop through values
+  int num_valid_values = 0;
+  for (int i=0; i < LOOP_HIST_CNT; i++) {
+    if (time_list[i] > 0) {
+      time_sum += time_list[i];
+      num_valid_values++;
+    }
+  }
+
+  // Divide by # valid values
+  freq_calc = time_sum / num_valid_values; // summed us divided by count -> us
+  freq_calc = 1000000 / freq_calc; // s/s-> Hz
+
+  return freq_calc;
+}
 
 void AngleCalcs() {
     // Get encoder position
@@ -202,16 +229,31 @@ void loop() {
 
   if (micros() - time_current_last >= TIME_CURRENT) {
     run_current = true;
+    time_current_past[time_current_past_idx] = micros() - time_current_last;
+    time_current_past_idx++;
+    if (time_current_past_idx >= LOOP_HIST_CNT) {
+      time_current_past_idx = 0;
+    }
     time_current_last = micros();
   }
 
   if (micros() - time_speed_last >= TIME_SPEED) {
     run_speed = true;
+    time_speed_past[time_speed_past_idx] = micros() - time_speed_last;
+    time_speed_past_idx++;
+    if (time_speed_past_idx >= LOOP_HIST_CNT) {
+      time_speed_past_idx = 0;
+    }
     time_speed_last = micros();
   }
 
   if (micros() - time_position_last >= TIME_POSITION) {
     run_position = true;
+    time_position_past[time_position_past_idx] = micros() - time_position_last;
+    time_position_past_idx++;
+    if (time_position_past_idx >= LOOP_HIST_CNT) {
+      time_position_past_idx = 0;
+    }
     time_position_last = micros();
   }
 
@@ -238,7 +280,7 @@ void loop() {
       
   if (millis() - loop_display_last >= DISPLAY_WAIT_TIME) {
     if (header_display >= HEADER_COUNT) {
-      Serial.println("Time [us]|Pos_Setpoint|Current_Position|Error|Speed_Setpoint|Current_Speed|Error|Pos_Setpoint|Current_Current|Error");
+      Serial.println("Time [us]|Pos_Setpoint|Current_Position|Pos_Error|Position_Freq|Speed_Setpoint|Current_Speed|Speed_Error|Speed_Freq|Pos_Setpoint|Current_Current|Current_Error|Current_Freq");
       header_display = 0;
     } else {
       header_display++;
@@ -251,6 +293,8 @@ void loop() {
       Serial.print(meas_position.value, 2);
       Serial.print("|");
       Serial.print((PID_Pos_Setpoint-meas_position.value),4);
+      Serial.print("|");
+      Serial.print(Loop_Freq_calc(time_position_past));
 
       Serial.print("|");
       Serial.print(PIDout_position,2);
@@ -258,6 +302,8 @@ void loop() {
       Serial.print(meas_speed.value, 2);
       Serial.print("|");
       Serial.print((PIDout_position-meas_speed.value),4);
+      Serial.print("|");
+      Serial.print(Loop_Freq_calc(time_speed_past));
 
       Serial.print("|");
       Serial.print(PIDout_speed,2);
@@ -265,6 +311,8 @@ void loop() {
       Serial.print(meas_current.value, 2);
       Serial.print("|");
       Serial.print((PIDout_speed-meas_current.value),4);
+      Serial.print("|");
+      Serial.print(Loop_Freq_calc(time_current_past));
 
       Serial.println();
       
